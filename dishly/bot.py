@@ -8,24 +8,18 @@ from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, result_keyboard, recipe_keyboard, dish_day_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
+from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, catalog_keyboard, catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
 from .parser import parse_query
-from .search import rank_recipes, recipe_ingredients
+from .search import rank_recipes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 db = None
 queries = {}
 MAX_INPUT = 500
 
-def recipe_text(recipe, servings=None, matched=None, missing=None, time_ok=None, failed_tags=None):
+def recipe_text(recipe, servings=None):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
     lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц."]
-    if matched is not None:
-        lines.append("Совпало: " + (", ".join(matched) if matched else "ничего из указанных продуктов"))
-        if missing: lines.append("Не хватает: " + ", ".join(missing))
-        elif not matched: lines.append("В запросе не было конкретных продуктов.")
-        if time_ok is False: lines.append(f"Не совпало условие времени: нужно до {db_query_limit.get('value','указанного времени')} мин.")
-        if failed_tags: lines.append("Не совпали пожелания: "+", ".join(failed_tags))
     lines += ["", "<b>Ингредиенты</b>"]
     for i in recipe["ingredients"]:
         amount = round(i["amount"]*ratio, 1)
@@ -35,28 +29,25 @@ def recipe_text(recipe, servings=None, matched=None, missing=None, time_ok=None,
     lines += ["", recipe["source"]]
     return "\n".join(lines)
 
-db_query_limit = {"value":20}
-
-async def show_search(message, offset=0):
-    uid=message.from_user.id
+async def show_search(message, offset=0, user_id=None, edit=False):
+    uid=user_id or message.from_user.id
     query,raw=queries.get(uid,(None,""))
     if not query: return
     settings=db.settings(uid)
-    db_query_limit["value"] = query.max_minutes or "указанного"
-    results=rank_recipes(db.recipes(),query,settings["excluded"],offset=offset,limit=5)
-    if not results:
-        await message.answer("По этому запросу ничего не нашлось. Попробуй другие продукты или пожелания.",reply_markup=main_menu()); return
-    end=min(offset+5,len(results))
-    # rank_recipes paginates from requested offset; get the total separately for a reliable next button.
     all_results=rank_recipes(db.recipes(),query,settings["excluded"],offset=0,limit=100)
-    await message.answer(f"Нашёл варианты по запросу «{raw[:100]}»:",reply_markup=main_menu())
-    for idx,(score,r,matched,missing,time_ok,failed_tags) in enumerate(results,offset+1):
-        text=f"<b>{idx}. {r['title']}</b> — {r['minutes']} мин.\nСовпало: {', '.join(matched) if matched else 'нет'}"
-        if missing: text += "\nНе хватает: "+", ".join(missing)
-        if not time_ok: text += f"\nВремя: {r['minutes']} мин. (дольше запроса)"
-        if failed_tags: text += "\nНе совпали пожелания: "+", ".join(failed_tags)
-        next_offset=offset+len(results) if offset+len(results)<len(all_results) and idx==offset+len(results) else None
-        await message.answer(text,parse_mode="HTML",reply_markup=result_keyboard(r["id"],next_offset))
+    page=all_results[offset:offset+5]
+    if not page:
+        text="По этому запросу больше рецептов нет. Попробуй другие продукты или пожелания."
+        if edit: await message.edit_text(text,reply_markup=None)
+        else: await message.answer(text,reply_markup=main_menu())
+        return
+    lines=[f"📚 <b>Каталог рецептов</b> · запрос: «{raw[:80]}»",""]
+    for i,(_,recipe,*_) in enumerate(page,offset+1):
+        lines.append(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин.")
+    markup=catalog_keyboard([row[1] for row in page],offset,offset+len(page)<len(all_results))
+    text="\n".join(lines)
+    if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+    else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
 async def main():
     global db
@@ -114,24 +105,28 @@ async def main():
         await dish_day(call.message,call.from_user.id)
         await call.answer()
 
-    @dp.callback_query(F.data.startswith("more:"))
-    async def more(call):
-        offset=int(call.data.split(":")[1])
-        await call.message.edit_reply_markup(reply_markup=None)
-        await call.message.answer("Ещё варианты:")
-        # Reuse the saved query; avoid an extra introductory message.
-        uid=call.from_user.id; query,raw=queries.get(uid,(None,""))
-        if not query: await call.answer("Сначала выполни поиск",show_alert=True); return
-        settings=db.settings(uid); rows=rank_recipes(db.recipes(),query,settings["excluded"],offset,5)
-        total=rank_recipes(db.recipes(),query,settings["excluded"],0,100)
-        for i,(score,r,matched,missing,time_ok,failed) in enumerate(rows,offset+1):
-            text=f"<b>{i}. {r['title']}</b> — {r['minutes']} мин.\nСовпало: {', '.join(matched) if matched else 'нет'}"
-            if missing:text+="\nНе хватает: "+", ".join(missing)
-            if not time_ok:text+=f"\nВремя: {r['minutes']} мин. (дольше запроса)"
-            if failed:text+="\nНе совпали пожелания: "+", ".join(failed)
-            no=offset+len(rows) if i==offset+len(rows) and offset+len(rows)<len(total) else None
-            await call.message.answer(text,parse_mode="HTML",reply_markup=result_keyboard(r["id"],no))
+    @dp.callback_query(F.data.startswith("catalogopen:"))
+    async def open_catalog_recipe(call):
+        _,offset,rid=call.data.split(":",2); offset=int(offset)
+        recipe=db.get_recipe(rid)
+        if not recipe: await call.answer("Рецепт не найден",show_alert=True); return
+        db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
+        saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
+        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved))
         await call.answer()
+
+    @dp.callback_query(F.data.startswith("catalog:"))
+    async def catalog_page(call):
+        offset=int(call.data.split(":")[1])
+        await show_search(call.message,offset,user_id=call.from_user.id,edit=True)
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("catalogfav:"))
+    async def catalog_favorite(call):
+        _,offset,rid=call.data.split(":",2); offset=int(offset)
+        saved=db.toggle_favorite(call.from_user.id,rid)
+        await call.message.edit_reply_markup(reply_markup=catalog_card_keyboard(rid,offset,saved))
+        await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("recipe:"))
     async def open_recipe(call):

@@ -8,6 +8,21 @@ def result_keyboard(rid, offset=None):
     if offset is not None: rows.append([InlineKeyboardButton(text="Ещё варианты",callback_data=f"more:{offset}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+def catalog_keyboard(recipes, offset=0, has_more=False):
+    rows = [[InlineKeyboardButton(text=f"{i}. {r['title']}", callback_data=f"catalogopen:{offset}:{r['id']}")]
+            for i, r in enumerate(recipes, offset + 1)]
+    if has_more:
+        rows.append([InlineKeyboardButton(text="Другие рецепты →", callback_data=f"catalog:{offset + len(recipes)}")])
+    rows.append([InlineKeyboardButton(text="В меню", callback_data="menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def catalog_card_keyboard(rid, offset=0, saved=False):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное", callback_data=f"catalogfav:{offset}:{rid}")],
+        [InlineKeyboardButton(text="Приготовил", callback_data=f"cooked:{rid}")],
+        [InlineKeyboardButton(text="← К списку рецептов", callback_data=f"catalog:{offset}")],
+    ])
+
 def recipe_keyboard(rid, saved=False):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"fav:{rid}")],
