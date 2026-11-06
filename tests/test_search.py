@@ -1,10 +1,8 @@
 import unittest
-import asyncio
 
 from dishly.parser import parse_query
 from dishly.search import rank_recipes
 from dishly.data.recipes import RECIPES
-from dishly.ai_parser import analyze_query
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -26,8 +24,8 @@ class ParserTests(unittest.TestCase):
         self.assertIn("вкусное",q.tags)
         self.assertIn("сладкое",q.tags)
 
-    def test_ai_parser_falls_back_without_key(self):
-        q=asyncio.run(analyze_query("хочу чего-нибудь сладенького",None))
+    def test_local_filters_understand_colloquial_request(self):
+        q=parse_query("хочу чего-нибудь сладенького")
         self.assertIn("сладкое",q.tags)
 
 class SearchTests(unittest.TestCase):
@@ -41,6 +39,14 @@ class SearchTests(unittest.TestCase):
         q=parse_query("сытное")
         rows=rank_recipes(RECIPES,q,user_exclusions=["лук"],limit=100)
         self.assertNotIn("chicken-rice",[row[1]["id"] for row in rows])
+
+    def test_cutlets_and_muffins_have_search_facets(self):
+        cutlet=parse_query("макароны с котлетами")
+        muffin=parse_query("хочу маффины, что-нибудь вкусненькое сладкое")
+        cutlet_rows=rank_recipes(RECIPES,cutlet,limit=5)
+        muffin_rows=rank_recipes(RECIPES,muffin,limit=5)
+        self.assertEqual(cutlet_rows[0][1]["id"],"pasta-cutlets")
+        self.assertEqual(muffin_rows[0][1]["id"],"apple-muffins")
 
 if __name__=="__main__": unittest.main()
 

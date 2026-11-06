@@ -9,7 +9,7 @@ from aiogram.types import Message, CallbackQuery
 from .config import load_config
 from .database import Database
 from .keyboards import main_menu, result_keyboard, recipe_keyboard, dish_day_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
-from .ai_parser import analyze_query
+from .parser import parse_query
 from .search import rank_recipes, recipe_ingredients
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -87,7 +87,7 @@ async def main():
             await show_settings(message); return
         if len(text)>MAX_INPUT:
             await message.answer(f"Запрос слишком длинный. Сократи его до {MAX_INPUT} символов."); return
-        query=await analyze_query(text,config.openai_api_key,config.openai_model)
+        query=parse_query(text)
         if not query.understood:
             await message.answer("Не понял запрос. Напиши продукты или пожелание вроде «быстрое блюдо без духовки».",reply_markup=unknown_keyboard()); return
         queries[message.from_user.id]=(query,text)

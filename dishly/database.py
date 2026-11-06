@@ -20,9 +20,13 @@ class Database:
         CREATE TABLE IF NOT EXISTS history(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), viewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id,recipe_id));
         CREATE TABLE IF NOT EXISTS dish_of_day(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
         """)
-        count = self.conn.execute("SELECT COUNT(*) FROM recipes").fetchone()[0]
-        if count == 0:
-            self.conn.executemany("INSERT INTO recipes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", [self._row(r) for r in RECIPES])
+        self.conn.executemany("""
+            INSERT INTO recipes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,
+            minutes=excluded.minutes,difficulty=excluded.difficulty,servings=excluded.servings,
+            tags=excluded.tags,method=excluded.method,allergens=excluded.allergens,
+            ingredients=excluded.ingredients,steps=excluded.steps,source=excluded.source
+        """, [self._row(r) for r in RECIPES])
         self.conn.commit()
 
     @staticmethod
