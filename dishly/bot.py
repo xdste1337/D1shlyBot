@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
+from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, canonical
 
@@ -20,6 +20,10 @@ filter_results = {}
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус"]
+ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","мясо","орехи","арахис","соя","кунжут","морепродукты"]
+
+def user_restrictions(settings):
+    return sorted(set(settings["excluded"]) | set(settings["allergies"]))
 
 def recipe_text(recipe, servings=None):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
@@ -38,7 +42,7 @@ async def show_search(message, offset=0, user_id=None, edit=False):
     query,raw=queries.get(uid,(None,""))
     if not query: return
     settings=db.settings(uid)
-    all_results=rank_recipes(db.recipes(),query,settings["excluded"],offset=0,limit=100)
+    all_results=rank_recipes(db.recipes(),query,user_restrictions(settings),offset=0,limit=100)
     page=all_results[offset:offset+5]
     if not page:
         text="По этому запросу больше рецептов нет. Попробуй другие продукты или пожелания."
@@ -113,7 +117,20 @@ async def main():
 
     async def show_settings(message):
         s=db.settings(message.from_user.id)
-        await message.answer("Настройки\nИсключения: "+(", ".join(s["excluded"]) or "нет"),reply_markup=settings_keyboard(s))
+        info=[]
+        info.append("Аллергии: "+(", ".join(s["allergies"]) or "не указаны"))
+        info.append("Не ем: "+(", ".join(s["excluded"]) or "ничего не исключено"))
+        await message.answer("Настройки\n"+"\n".join(info),reply_markup=settings_keyboard(s))
+
+    async def show_restrictions(message,uid,category,page=0):
+        s=db.settings(uid)
+        if category=="allergies":
+            options=ALLERGY_OPTIONS; selected=set(s["allergies"])
+            title="Выбери аллергены. Рецепты с ними будут исключены по составу и аллергенам каталога. Возможные следы аллергенов каталог не описывает."
+        else:
+            options=sorted(set(ingredient_filter_options())|{"молочное","глютен","мясо"}); selected=set(s["excluded"])
+            title="Отметь продукты, которые не хочешь видеть в рецептах."
+        await message.edit_text(title+"\nОтмечено: "+(", ".join(sorted(selected)) or "ничего"),reply_markup=restriction_keyboard(category,options,selected,page))
 
     def get_filter_state(uid):
         return filter_states.setdefault(uid,{"ingredients":set(),"methods":set(),"moods":set(),"max_minutes":None})
@@ -153,7 +170,7 @@ async def main():
 
     async def show_filtered_results(message,uid,offset=0,edit=True):
         state=get_filter_state(uid); settings=db.settings(uid)
-        recipes=filter_recipes(db.recipes(),state["ingredients"],state["methods"]|state["moods"],state["max_minutes"],settings["excluded"])
+        recipes=filter_recipes(db.recipes(),state["ingredients"],state["methods"]|state["moods"],state["max_minutes"],user_restrictions(settings))
         filter_results[uid]=[recipe["id"] for recipe in recipes]
         if not recipes:
             text="По всем выбранным условиям рецептов не нашлось. Попробуй убрать один из фильтров."
@@ -176,7 +193,7 @@ async def main():
             if not candidates: return
             recipe=random.choice(candidates); db.set_shared_dish_today(recipe["id"]); rid=recipe["id"]
         recipe=db.get_recipe(rid); db.add_history(uid,rid)
-        if blocked(recipe,settings["excluded"]):
+        if blocked(recipe,user_restrictions(settings)):
             text=(f"🍲 <b>Блюдо дня для всех</b>\n\n<b>{recipe['title']}</b> · {recipe['minutes']} мин.\n"
                   "В рецепте есть продукт из твоих исключений. Чтобы подобрать другой подходящий вариант, воспользуйся поиском.")
         else:
@@ -189,7 +206,7 @@ async def main():
         settings=db.settings(user_id)
         daily_id=db.shared_dish_today()
         seen=db.user_alternatives_today(user_id)
-        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and not blocked(r,settings["excluded"])]
+        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and not blocked(r,user_restrictions(settings))]
         if not candidates:
             text="На сегодня больше подходящих вариантов нет. Общее блюдо дня осталось прежним."
             if edit: await message.edit_text(text,reply_markup=None)
@@ -290,7 +307,7 @@ async def main():
         else:
             if category=="methods": selected.clear()
             selected.add(value)
-        await show_filter_category(call.message,call.from_user.id,category,index//8)
+        await show_filter_category(call.message,call.from_user.id,category,index//12)
         await call.answer()
 
     @dp.callback_query(F.data.startswith("ftime:"))
@@ -369,9 +386,13 @@ async def main():
     async def settings_action(call):
         action=call.data.split(":")[1]; s=db.settings(call.from_user.id)
         if action in ("servings",): await call.message.edit_text("Выбери число порций:",reply_markup=servings_keyboard())
-        elif action=="exclude": await call.message.edit_text("Нажимай исключения, чтобы включать или убирать:",reply_markup=exclusions_keyboard(s["excluded"]))
-        elif action=="clear": db.set_excluded(call.from_user.id,[]); await call.message.edit_text("Исключения сброшены.",reply_markup=settings_keyboard(db.settings(call.from_user.id)))
-        elif action=="back": await call.message.edit_text("Настройки\nИсключения: "+(", ".join(s["excluded"]) or "нет"),reply_markup=settings_keyboard(s))
+        elif action in ("exclude","allergies"): await show_restrictions(call.message,call.from_user.id,action)
+        elif action=="clear":
+            db.set_excluded(call.from_user.id,[]); db.set_allergies(call.from_user.id,[])
+            await call.message.edit_text("Аллергии и исключённые продукты сброшены.",reply_markup=settings_keyboard(db.settings(call.from_user.id)))
+        elif action=="back":
+            info="Настройки\nАллергии: "+(", ".join(s["allergies"]) or "не указаны")+"\nНе ем: "+(", ".join(s["excluded"]) or "ничего не исключено")
+            await call.message.edit_text(info,reply_markup=settings_keyboard(s))
         await call.answer()
 
     @dp.callback_query(F.data.startswith("servings:"))
@@ -384,6 +405,26 @@ async def main():
         if x in values: values.remove(x)
         else: values.add(x)
         db.set_excluded(call.from_user.id,sorted(values)); await call.message.edit_reply_markup(reply_markup=exclusions_keyboard(values)); await call.answer()
+
+    @dp.callback_query(F.data.startswith("rpage:"))
+    async def restriction_page(call):
+        _,category,page=call.data.split(":")
+        await show_restrictions(call.message,call.from_user.id,category,int(page)); await call.answer()
+
+    @dp.callback_query(F.data.startswith("rtoggle:"))
+    async def toggle_restriction(call):
+        _,category,index=call.data.split(":"); index=int(index)
+        if category=="allergies": options=ALLERGY_OPTIONS
+        elif category=="excluded": options=sorted(set(ingredient_filter_options())|{"молочное","глютен","мясо"})
+        else: await call.answer("Раздел не найден",show_alert=True); return
+        if index<0 or index>=len(options): await call.answer("Пункт не найден",show_alert=True); return
+        s=db.settings(call.from_user.id); field="allergies" if category=="allergies" else "excluded"
+        values=set(s[field]); value=options[index]
+        if value in values: values.remove(value)
+        else: values.add(value)
+        if field=="allergies": db.set_allergies(call.from_user.id,sorted(values))
+        else: db.set_excluded(call.from_user.id,sorted(values))
+        await show_restrictions(call.message,call.from_user.id,category,index//12); await call.answer()
 
     @dp.errors()
     async def errors(event):

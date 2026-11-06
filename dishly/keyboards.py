@@ -47,20 +47,22 @@ def all_catalog_card_keyboard(rid, offset=0, saved=False):
 def filter_home_keyboard(state):
     def count(key): return len(state[key]) if key != "max_minutes" else int(state[key] is not None)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Ингредиенты ({count('ingredients')})",callback_data="fcat:ingredients")],
-        [InlineKeyboardButton(text=f"Способ готовки ({count('methods')})",callback_data="fcat:methods")],
-        [InlineKeyboardButton(text=f"Время ({state['max_minutes'] or 'любое'})",callback_data="fcat:time")],
-        [InlineKeyboardButton(text=f"Пожелания ({count('moods')})",callback_data="fcat:moods")],
+        [InlineKeyboardButton(text=f"Продукты · {count('ingredients')}",callback_data="fcat:ingredients"),InlineKeyboardButton(text=f"Способ · {count('methods')}",callback_data="fcat:methods")],
+        [InlineKeyboardButton(text=f"Время · {state['max_minutes'] or 'любое'}",callback_data="fcat:time"),InlineKeyboardButton(text=f"Пожелания · {count('moods')}",callback_data="fcat:moods")],
         [InlineKeyboardButton(text="Показать рецепты",callback_data="fapply")],
         [InlineKeyboardButton(text="Сбросить фильтры",callback_data="freset"),InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
 
-def filter_options_keyboard(category, options, selected, page=0, page_size=8):
+def filter_options_keyboard(category, options, selected, page=0, page_size=12):
     start=page*page_size; visible=options[start:start+page_size]
     rows=[]
+    buttons=[]
     for idx,label in enumerate(visible,start):
         marker="✓ " if label in selected else ""
-        rows.append([InlineKeyboardButton(text=marker+label,callback_data=f"ftoggle:{category}:{idx}")])
+        buttons.append(InlineKeyboardButton(text=marker+label,callback_data=f"ftoggle:{category}:{idx}"))
+        if len(buttons)==2:
+            rows.append(buttons); buttons=[]
+    if buttons: rows.append(buttons)
     nav=[]
     if page>0: nav.append(InlineKeyboardButton(text="←",callback_data=f"foptpage:{category}:{page-1}"))
     if start+page_size<len(options): nav.append(InlineKeyboardButton(text="→",callback_data=f"foptpage:{category}:{page+1}"))
@@ -70,7 +72,9 @@ def filter_options_keyboard(category, options, selected, page=0, page_size=8):
 
 def filter_time_keyboard(selected):
     options=[15,20,30,45,60]
-    rows=[[InlineKeyboardButton(text=("✓ " if selected==n else "")+f"До {n} минут",callback_data=f"ftime:{n}")] for n in options]
+    rows=[]
+    for i in range(0,len(options),2):
+        rows.append([InlineKeyboardButton(text=("✓ " if selected==n else "")+f"До {n} мин.",callback_data=f"ftime:{n}") for n in options[i:i+2]])
     rows.append([InlineKeyboardButton(text="Любое время",callback_data="ftime:0")])
     rows.append([InlineKeyboardButton(text="Готово",callback_data="fhome")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -122,8 +126,8 @@ def unknown_keyboard():
 def settings_keyboard(settings):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"Порций: {settings['servings']} (изменить)",callback_data="settings:servings")],
-        [InlineKeyboardButton(text="Исключить ингредиент",callback_data="settings:exclude")],
-        [InlineKeyboardButton(text="Сбросить исключения",callback_data="settings:clear")],
+        [InlineKeyboardButton(text=f"Аллергии · {len(settings['allergies'])}",callback_data="settings:allergies"),InlineKeyboardButton(text=f"Не ем · {len(settings['excluded'])}",callback_data="settings:exclude")],
+        [InlineKeyboardButton(text="Сбросить ограничения",callback_data="settings:clear")],
         [InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
 
@@ -133,4 +137,18 @@ def servings_keyboard():
 def exclusions_keyboard(current):
     options=["лук","молочное","глютен","мясо"]
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=("✓ " if x in current else "")+x,callback_data=f"exclude:{x}")] for x in options]+[[InlineKeyboardButton(text="Готово",callback_data="settings:back")]])
+
+def restriction_keyboard(category, options, selected, page=0, page_size=12):
+    start=page*page_size; visible=options[start:start+page_size]; rows=[]; pending=[]
+    for idx,label in enumerate(visible,start):
+        prefix="✓ " if label in selected else ""
+        pending.append(InlineKeyboardButton(text=prefix+label,callback_data=f"rtoggle:{category}:{idx}"))
+        if len(pending)==2: rows.append(pending); pending=[]
+    if pending: rows.append(pending)
+    nav=[]
+    if page>0: nav.append(InlineKeyboardButton(text="←",callback_data=f"rpage:{category}:{page-1}"))
+    if start+page_size<len(options): nav.append(InlineKeyboardButton(text="→",callback_data=f"rpage:{category}:{page+1}"))
+    if nav: rows.append(nav)
+    rows.append([InlineKeyboardButton(text="Готово",callback_data="settings:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 

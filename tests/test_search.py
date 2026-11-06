@@ -1,10 +1,13 @@
 import unittest
+import sqlite3
+import tempfile
+import os
 
 from dishly.parser import parse_query
 from dishly.search import rank_recipes, filter_recipes
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
-from dishly.keyboards import all_catalog_keyboard
+from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -62,6 +65,12 @@ class SearchTests(unittest.TestCase):
         none=filter_recipes(RECIPES,ingredients=["банан","курица"])
         self.assertEqual(none,[])
 
+    def test_allergy_and_excluded_ingredients_filter_recipes(self):
+        omelet=next(recipe for recipe in RECIPES if recipe["id"]=="omelet-tomato")
+        self.assertNotIn(omelet,filter_recipes(RECIPES,user_exclusions=["яйца"]))
+        self.assertNotIn(omelet,filter_recipes(RECIPES,user_exclusions=["молочное"]))
+        self.assertIn(omelet,filter_recipes(RECIPES,user_exclusions=["грибы"]))
+
     def test_cutlets_and_muffins_have_search_facets(self):
         cutlet=parse_query("макароны с котлетами")
         muffin=parse_query("хочу маффины, что-нибудь вкусненькое сладкое")
@@ -78,7 +87,23 @@ class SharedDishTests(unittest.TestCase):
         self.assertEqual(database.shared_dish_today(),"omelet-tomato")
         self.assertEqual(database.user_alternatives_today(123),{"apple-muffins"})
         self.assertEqual(database.shared_dish_today(),"omelet-tomato")
+        database.ensure_user(123)
+        database.set_allergies(123,["яйца","молочное"])
+        self.assertEqual(set(database.settings(123)["allergies"]),{"яйца","молочное"})
         database.conn.close()
+
+    def test_existing_user_database_gets_allergy_column(self):
+        handle=tempfile.NamedTemporaryFile(suffix=".sqlite3",delete=False)
+        path=handle.name; handle.close()
+        try:
+            old=sqlite3.connect(path)
+            old.execute("CREATE TABLE users(user_id INTEGER PRIMARY KEY, servings INTEGER NOT NULL DEFAULT 2, excluded TEXT NOT NULL DEFAULT '[]')")
+            old.execute("INSERT INTO users(user_id) VALUES(789)"); old.commit(); old.close()
+            database=Database(path)
+            self.assertEqual(database.settings(789)["allergies"],[])
+            database.conn.close()
+        finally:
+            os.unlink(path)
 
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_new_detailed_recipes_and_two_way_paging(self):
@@ -89,6 +114,8 @@ class CatalogTests(unittest.TestCase):
         callbacks=[button.callback_data for row in keyboard.inline_keyboard for button in row]
         self.assertIn("allcatalog:0",callbacks)
         self.assertIn("allcatalog:10",callbacks)
+        option_kb=filter_options_keyboard("ingredients",[f"продукт {i}" for i in range(12)],set())
+        self.assertTrue(all(len(row)<=2 for row in option_kb.inline_keyboard))
 
     def test_history_keeps_only_latest_ten(self):
         database=Database(":memory:")
