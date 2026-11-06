@@ -55,6 +55,9 @@ class SharedDishTests(unittest.TestCase):
         database.set_shared_dish_today("omelet-tomato")
         database.mark_user_alternative(123,"apple-muffins")
         self.assertEqual(database.shared_dish_today(),"omelet-tomato")
+        self.assertEqual(database.user_alternatives_today(123),{"apple-muffins"})
+        self.assertEqual(database.shared_dish_today(),"omelet-tomato")
+        database.conn.close()
 
     def test_history_keeps_only_latest_ten(self):
         database=Database(":memory:")
@@ -65,8 +68,7 @@ class SharedDishTests(unittest.TestCase):
         self.assertEqual(len(history),10)
         self.assertEqual(history[0]["id"],recipes[11]["id"])
         self.assertNotIn(recipes[0]["id"],[recipe["id"] for recipe in history])
-        self.assertEqual(database.user_alternatives_today(123),{"apple-muffins"})
-        self.assertEqual(database.shared_dish_today(),"omelet-tomato")
+        database.conn.close()
 
 if __name__=="__main__": unittest.main()
 
