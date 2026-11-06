@@ -4,6 +4,7 @@ from dishly.parser import parse_query
 from dishly.search import rank_recipes
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
+from dishly.keyboards import all_catalog_keyboard
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -58,6 +59,16 @@ class SharedDishTests(unittest.TestCase):
         self.assertEqual(database.user_alternatives_today(123),{"apple-muffins"})
         self.assertEqual(database.shared_dish_today(),"omelet-tomato")
         database.conn.close()
+
+class CatalogTests(unittest.TestCase):
+    def test_catalog_has_new_detailed_recipes_and_two_way_paging(self):
+        self.assertGreaterEqual(len(RECIPES),30)
+        soup=next(recipe for recipe in RECIPES if recipe["id"]=="chicken-noodle-soup")
+        self.assertGreaterEqual(len(soup["steps"]),4)
+        keyboard=all_catalog_keyboard(RECIPES[5:10],offset=5,has_more=True)
+        callbacks=[button.callback_data for row in keyboard.inline_keyboard for button in row]
+        self.assertIn("allcatalog:0",callbacks)
+        self.assertIn("allcatalog:10",callbacks)
 
     def test_history_keeps_only_latest_ten(self):
         database=Database(":memory:")

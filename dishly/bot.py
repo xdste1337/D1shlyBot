@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
+from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
 from .parser import parse_query
 from .search import blocked, rank_recipes
 
@@ -49,6 +49,21 @@ async def show_search(message, offset=0, user_id=None, edit=False):
     if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
     else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
+async def show_all_catalog(message, offset=0, user_id=None, edit=False):
+    recipes=sorted(db.recipes(),key=lambda recipe:recipe["title"].casefold())
+    page=recipes[offset:offset+5]
+    if not page:
+        text="В каталоге пока нет рецептов."
+        if edit: await message.edit_text(text,reply_markup=None)
+        else: await message.answer(text,reply_markup=main_menu())
+        return
+    start=offset+1; end=offset+len(page)
+    text=f"📚 <b>Все рецепты</b> · {start}–{end} из {len(recipes)}\n\n"
+    text+="\n".join(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин." for i,recipe in enumerate(page,start))
+    markup=all_catalog_keyboard(page,offset,end<len(recipes))
+    if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+    else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
+
 async def main():
     global db
     config=load_config(); db=Database(config.database_path)
@@ -68,6 +83,8 @@ async def main():
         text=message.text.strip()
         if text in {"Найти рецепт","🔎 Найти рецепт"}:
             await message.answer("Напиши продукты или пожелание, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
+        if text=="Все рецепты":
+            await show_all_catalog(message); return
         if text=="Блюдо дня":
             await dish_day(message); return
         if text=="Избранное":
@@ -168,6 +185,29 @@ async def main():
         _,offset,rid=call.data.split(":",2); offset=int(offset)
         saved=db.toggle_favorite(call.from_user.id,rid)
         await call.message.edit_reply_markup(reply_markup=catalog_card_keyboard(rid,offset,saved))
+        await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
+
+    @dp.callback_query(F.data.startswith("allcatalogopen:"))
+    async def open_all_catalog_recipe(call):
+        _,offset,rid=call.data.split(":",2); offset=int(offset)
+        recipe=db.get_recipe(rid)
+        if not recipe: await call.answer("Рецепт не найден",show_alert=True); return
+        db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
+        saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
+        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=all_catalog_card_keyboard(rid,offset,saved))
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("allcatalog:"))
+    async def all_catalog_page(call):
+        offset=int(call.data.split(":")[1])
+        await show_all_catalog(call.message,offset,user_id=call.from_user.id,edit=True)
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("allcatalogfav:"))
+    async def all_catalog_favorite(call):
+        _,offset,rid=call.data.split(":",2); offset=int(offset)
+        saved=db.toggle_favorite(call.from_user.id,rid)
+        await call.message.edit_reply_markup(reply_markup=all_catalog_card_keyboard(rid,offset,saved))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("recipe:"))

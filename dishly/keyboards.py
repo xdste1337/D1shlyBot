@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 def main_menu():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Найти рецепт"),KeyboardButton(text="Блюдо дня")],[KeyboardButton(text="Избранное"),KeyboardButton(text="История")],[KeyboardButton(text="Настройки")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Найти рецепт"),KeyboardButton(text="Все рецепты")],[KeyboardButton(text="Блюдо дня")],[KeyboardButton(text="Избранное"),KeyboardButton(text="История")],[KeyboardButton(text="Настройки")]], resize_keyboard=True)
 
 def result_keyboard(rid, offset=None):
     rows=[[InlineKeyboardButton(text="Открыть рецепт",callback_data=f"recipe:{rid}")]]
@@ -25,6 +25,23 @@ def catalog_card_keyboard(rid, offset=0, saved=False):
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное", callback_data=f"catalogfav:{offset}:{rid}")],
         [InlineKeyboardButton(text="Приготовил", callback_data=f"cooked:{rid}")],
         [InlineKeyboardButton(text="← К списку рецептов", callback_data=f"catalog:{offset}")],
+    ])
+
+def all_catalog_keyboard(recipes, offset=0, has_more=False):
+    rows=[[InlineKeyboardButton(text=f"{i}. {r['title']}",callback_data=f"allcatalogopen:{offset}:{r['id']}")]
+          for i,r in enumerate(recipes,offset+1)]
+    nav=[]
+    if offset>0: nav.append(InlineKeyboardButton(text="← Назад",callback_data=f"allcatalog:{max(0,offset-5)}"))
+    if has_more: nav.append(InlineKeyboardButton(text="Дальше →",callback_data=f"allcatalog:{offset+len(recipes)}"))
+    if nav: rows.append(nav)
+    rows.append([InlineKeyboardButton(text="В меню",callback_data="menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def all_catalog_card_keyboard(rid, offset=0, saved=False):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"allcatalogfav:{offset}:{rid}")],
+        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
+        [InlineKeyboardButton(text="← Все рецепты",callback_data=f"allcatalog:{offset}")],
     ])
 
 def recipe_keyboard(rid, saved=False):
