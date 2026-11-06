@@ -4,7 +4,7 @@ import tempfile
 import os
 
 from dishly.parser import parse_query
-from dishly.search import rank_recipes, filter_recipes, blocked
+from dishly.search import rank_recipes, filter_recipes, blocked, recipe_ingredients
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
 from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard
@@ -50,6 +50,11 @@ class SearchTests(unittest.TestCase):
         rows=rank_recipes(RECIPES,q,limit=5)
         self.assertTrue(rows)
         self.assertEqual(rows[0][1]["id"],"omelet-tomato")
+
+    def test_ingredient_query_hides_recipes_missing_that_ingredient(self):
+        rows=rank_recipes(RECIPES,parse_query("макароны"),limit=100)
+        self.assertTrue(rows)
+        self.assertTrue(all("макароны" in recipe_ingredients(row[1]) for row in rows))
 
     def test_user_exclusion_filters(self):
         q=parse_query("сытное")

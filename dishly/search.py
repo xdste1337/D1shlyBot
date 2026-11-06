@@ -41,6 +41,8 @@ def rank_recipes(recipes, query, user_exclusions=(), offset=0, limit=5):
         ranked.append((points, recipe, sorted(matched), sorted(missing), time_ok, sorted(query.tags-tag_overlap)))
     # Enforce explicit time limits whenever at least one recipe satisfies them. If none do,
     # return the nearest slower options and label the mismatch in the result.
+    if query.ingredients and any(not row[3] for row in ranked):
+        ranked = [row for row in ranked if not row[3]]
     if query.max_minutes and any(row[4] for row in ranked):
         ranked = [row for row in ranked if row[4]]
     if query.tags and any(not row[5] for row in ranked):
