@@ -1,5 +1,7 @@
 from .data.vocabulary import EXCLUSION_GROUPS
 
+NON_FILTERING_TAGS = {"вкусное"}
+
 ALIASES = {"сливочное масло":"масло"}
 
 def canonical(name):
@@ -34,11 +36,12 @@ def rank_recipes(recipes, query, user_exclusions=(), offset=0, limit=5):
         if query.ingredients:
             points += len(matched) / len(query.ingredients) * 10
             points -= min(len(missing), 3) * 1.4
-        if query.tags: points += len(tag_overlap) * 3.0 - (len(query.tags)-len(tag_overlap))*1.5
+        filter_tags = query.tags - NON_FILTERING_TAGS
+        if filter_tags: points += len(tag_overlap & filter_tags) * 3.0 - (len(filter_tags-(tag_overlap & filter_tags)))*1.5
         if query.max_minutes: points += 2 if time_ok else -4
         if not query.ingredients and not query.tags and not query.max_minutes: continue
         # Surface imperfect results as such, without claiming failed conditions matched.
-        ranked.append((points, recipe, sorted(matched), sorted(missing), time_ok, sorted(query.tags-tag_overlap)))
+        ranked.append((points, recipe, sorted(matched), sorted(missing), time_ok, sorted((query.tags-tag_overlap)-NON_FILTERING_TAGS)))
     # Enforce explicit time limits whenever at least one recipe satisfies them. If none do,
     # return the nearest slower options and label the mismatch in the result.
     if query.max_minutes and any(row[4] for row in ranked):
