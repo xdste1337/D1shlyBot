@@ -19,7 +19,7 @@ MAX_INPUT = 500
 
 def recipe_text(recipe, servings=None):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
-    lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц."]
+    lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц.",f"Способ: {recipe['method']}"]
     lines += ["", "<b>Ингредиенты</b>"]
     for i in recipe["ingredients"]:
         amount = round(i["amount"]*ratio, 1)

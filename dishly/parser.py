@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 
-from .data.vocabulary import INGREDIENTS, TAGS
+from .data.vocabulary import INGREDIENTS, TAGS, TAG_PATTERNS
 
 @dataclass
 class ParsedQuery:
@@ -39,6 +39,8 @@ def parse_query(text: str) -> ParsedQuery:
     if re.search(r"\b(?:не\s+остр\w*|без\s+остр\w*)\b", norm): excluded.add("острое")
     for tag, variants in TAGS.items():
         if any(re.search(rf"\b{re.escape(normalize(v))}\b", norm) for v in variants): tags.add(tag)
+    for tag, patterns in TAG_PATTERNS.items():
+        if any(re.search(pattern, norm) for pattern in patterns): tags.add(tag)
     m = re.search(r"(?:до|не более|меньше)\s*(\d{1,3})\s*минут", norm)
     max_minutes = int(m.group(1)) if m else (20 if "быстро" in tags else None)
     ingredients -= excluded

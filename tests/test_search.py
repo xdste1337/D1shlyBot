@@ -30,6 +30,12 @@ class ParserTests(unittest.TestCase):
         q=parse_query("хочу чего-нибудь сладенького")
         self.assertIn("сладкое",q.tags)
 
+    def test_device_and_vessel_word_forms_use_one_canonical_filter(self):
+        for phrase in ("готовь в микроволновке", "поставь у микроволновки", "разогрей в микроволновую печь"):
+            self.assertEqual(parse_query(phrase).tags,{"микроволновка"})
+        self.assertEqual(parse_query("сделай в аерогриле").tags,{"аэрогриль"})
+        self.assertEqual(parse_query("приготовь в кастрюле").tags,{"кастрюля"})
+
 class SearchTests(unittest.TestCase):
     def test_ingredient_match_ranks_first(self):
         q=parse_query("яйца помидоры")
@@ -41,6 +47,14 @@ class SearchTests(unittest.TestCase):
         q=parse_query("сытное")
         rows=rank_recipes(RECIPES,q,user_exclusions=["лук"],limit=100)
         self.assertNotIn("chicken-rice",[row[1]["id"] for row in rows])
+
+    def test_cooking_method_filters_return_recipes_for_that_method(self):
+        microwave=rank_recipes(RECIPES,parse_query("в микроволновке"),limit=100)
+        airfryer=rank_recipes(RECIPES,parse_query("в аерогриле"),limit=100)
+        pots=rank_recipes(RECIPES,parse_query("в кастрюле"),limit=100)
+        self.assertEqual({row[1]["id"] for row in microwave},{"microwave-oatmeal","microwave-mug-cake"})
+        self.assertEqual({row[1]["id"] for row in airfryer},{"airfryer-potatoes","airfryer-chicken"})
+        self.assertIn("chicken-noodle-soup",{row[1]["id"] for row in pots})
 
     def test_cutlets_and_muffins_have_search_facets(self):
         cutlet=parse_query("макароны с котлетами")
