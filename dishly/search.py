@@ -48,3 +48,22 @@ def rank_recipes(recipes, query, user_exclusions=(), offset=0, limit=5):
     ranked.sort(key=lambda row: (-row[0], row[1]["minutes"], row[1]["title"]))
     return ranked[offset:offset+limit]
 
+def filter_recipes(recipes, ingredients=(), tags=(), max_minutes=None, user_exclusions=()):
+    """Return only recipes satisfying every filter selected in the interactive filter UI."""
+    selected_ingredients=set(ingredients)
+    selected_tags=set(tags)
+    result=[]
+    for recipe in recipes:
+        if blocked(recipe,user_exclusions):
+            continue
+        terms=recipe_ingredients(recipe)
+        recipe_tags=set(recipe["tags"])
+        if selected_ingredients and not selected_ingredients.issubset(terms):
+            continue
+        if selected_tags and not selected_tags.issubset(recipe_tags):
+            continue
+        if max_minutes is not None and recipe["minutes"]>max_minutes:
+            continue
+        result.append(recipe)
+    return sorted(result,key=lambda recipe:(recipe["minutes"],recipe["title"]))
+

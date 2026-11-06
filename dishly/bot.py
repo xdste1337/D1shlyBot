@@ -8,14 +8,18 @@ from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
+from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
 from .parser import parse_query
-from .search import blocked, rank_recipes
+from .search import blocked, filter_recipes, rank_recipes, canonical
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 db = None
 queries = {}
+filter_states = {}
+filter_results = {}
 MAX_INPUT = 500
+FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
+FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус"]
 
 def recipe_text(recipe, servings=None):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
@@ -85,6 +89,8 @@ async def main():
             await message.answer("Напиши продукты или пожелание, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
         if text=="Все рецепты":
             await show_all_catalog(message); return
+        if text=="Фильтры":
+            await show_filter_home(message,message.from_user.id); return
         if text=="Блюдо дня":
             await dish_day(message); return
         if text=="Избранное":
@@ -108,6 +114,59 @@ async def main():
     async def show_settings(message):
         s=db.settings(message.from_user.id)
         await message.answer("Настройки\nИсключения: "+(", ".join(s["excluded"]) or "нет"),reply_markup=settings_keyboard(s))
+
+    def get_filter_state(uid):
+        return filter_states.setdefault(uid,{"ingredients":set(),"methods":set(),"moods":set(),"max_minutes":None})
+
+    def ingredient_filter_options():
+        return sorted({canonical(item["name"]) for recipe in db.recipes() for item in recipe["ingredients"] if not item.get("optional",False)})
+
+    def filter_options(category):
+        if category=="ingredients": return ingredient_filter_options()
+        if category=="methods": return FILTER_METHODS
+        if category=="moods": return FILTER_MOODS
+        return []
+
+    async def show_filter_home(message,uid,edit=False):
+        state=get_filter_state(uid)
+        selected=[]
+        for key,title in (("ingredients","продукты"),("methods","способ"),("moods","пожелания")):
+            if state[key]: selected.append(title+": "+", ".join(sorted(state[key])))
+        if state["max_minutes"]: selected.append(f"время: до {state['max_minutes']} мин.")
+        summary="\n".join(selected) if selected else "Пока фильтры не выбраны — покажу весь каталог."
+        text="🔎 <b>Фильтры поиска</b>\nВыбери условия. Между разделами действует И: результат должен подходить всем выбранным фильтрам.\n\n"+summary
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=filter_home_keyboard(state))
+        else: await message.answer(text,parse_mode="HTML",reply_markup=filter_home_keyboard(state))
+
+    async def show_filter_category(message,uid,category,page=0):
+        state=get_filter_state(uid)
+        if category=="time":
+            text="Выбери максимальное время готовки:"
+            markup=filter_time_keyboard(state["max_minutes"])
+        else:
+            titles={"ingredients":"Выбери продукты. Будут показаны блюда, в которых есть каждый выбранный продукт:","methods":"Выбери способ приготовления:","moods":"Выбери пожелания к блюду:"}
+            options=filter_options(category)
+            selected=state[category]
+            text=titles[category]+f"\nВыбрано: {', '.join(sorted(selected)) if selected else 'ничего'}"
+            markup=filter_options_keyboard(category,options,selected,page)
+        await message.edit_text(text,reply_markup=markup)
+
+    async def show_filtered_results(message,uid,offset=0,edit=True):
+        state=get_filter_state(uid); settings=db.settings(uid)
+        recipes=filter_recipes(db.recipes(),state["ingredients"],state["methods"]|state["moods"],state["max_minutes"],settings["excluded"])
+        filter_results[uid]=[recipe["id"] for recipe in recipes]
+        if not recipes:
+            text="По всем выбранным условиям рецептов не нашлось. Попробуй убрать один из фильтров."
+            if edit: await message.edit_text(text,reply_markup=filter_home_keyboard(state))
+            else: await message.answer(text,reply_markup=filter_home_keyboard(state))
+            return
+        ids=filter_results[uid][offset:offset+5]
+        page=[db.get_recipe(rid) for rid in ids]
+        text=f"📚 <b>Рецепты по фильтрам</b> · {offset+1}–{offset+len(page)} из {len(recipes)}\n\n"
+        text+="\n".join(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин." for i,recipe in enumerate(page,offset+1))
+        markup=filtered_results_keyboard(page,offset,offset+len(page)<len(recipes))
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+        else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
     async def dish_day(message, user_id=None, edit=False):
         uid=user_id or message.from_user.id; settings=db.settings(uid)
@@ -208,6 +267,75 @@ async def main():
         _,offset,rid=call.data.split(":",2); offset=int(offset)
         saved=db.toggle_favorite(call.from_user.id,rid)
         await call.message.edit_reply_markup(reply_markup=all_catalog_card_keyboard(rid,offset,saved))
+        await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
+
+    @dp.callback_query(F.data.startswith("fcat:"))
+    async def filter_category(call):
+        await show_filter_category(call.message,call.from_user.id,call.data.split(":",1)[1])
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("foptpage:"))
+    async def filter_options_page(call):
+        _,category,page=call.data.split(":")
+        await show_filter_category(call.message,call.from_user.id,category,int(page))
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("ftoggle:"))
+    async def toggle_filter(call):
+        _,category,index=call.data.split(":")
+        index=int(index); options=filter_options(category)
+        if index<0 or index>=len(options): await call.answer("Фильтр не найден",show_alert=True); return
+        value=options[index]; selected=get_filter_state(call.from_user.id)[category]
+        if value in selected: selected.remove(value)
+        else:
+            if category=="methods": selected.clear()
+            selected.add(value)
+        await show_filter_category(call.message,call.from_user.id,category,index//8)
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("ftime:"))
+    async def set_filter_time(call):
+        value=int(call.data.split(":")[1]); get_filter_state(call.from_user.id)["max_minutes"]=value or None
+        await show_filter_category(call.message,call.from_user.id,"time")
+        await call.answer()
+
+    @dp.callback_query(F.data=="fhome")
+    async def filter_home(call):
+        await show_filter_home(call.message,call.from_user.id,edit=True)
+        await call.answer()
+
+    @dp.callback_query(F.data=="freset")
+    async def reset_filters(call):
+        filter_states[call.from_user.id]={"ingredients":set(),"methods":set(),"moods":set(),"max_minutes":None}
+        await show_filter_home(call.message,call.from_user.id,edit=True)
+        await call.answer("Фильтры сброшены")
+
+    @dp.callback_query(F.data=="fapply")
+    async def apply_filters(call):
+        await show_filtered_results(call.message,call.from_user.id,edit=True)
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("filterpage:"))
+    async def filtered_page(call):
+        offset=int(call.data.split(":")[1])
+        await show_filtered_results(call.message,call.from_user.id,offset,edit=True)
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("filteropen:"))
+    async def open_filtered_recipe(call):
+        _,offset,rid=call.data.split(":",2); offset=int(offset)
+        recipe=db.get_recipe(rid)
+        if not recipe: await call.answer("Рецепт не найден",show_alert=True); return
+        db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
+        saved=any(item["id"]==rid for item in db.favorites(call.from_user.id))
+        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=filtered_card_keyboard(rid,offset,saved))
+        await call.answer()
+
+    @dp.callback_query(F.data.startswith("filterfav:"))
+    async def filtered_favorite(call):
+        _,offset,rid=call.data.split(":",2); offset=int(offset)
+        saved=db.toggle_favorite(call.from_user.id,rid)
+        await call.message.edit_reply_markup(reply_markup=filtered_card_keyboard(rid,offset,saved))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("recipe:"))

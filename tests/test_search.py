@@ -1,7 +1,7 @@
 import unittest
 
 from dishly.parser import parse_query
-from dishly.search import rank_recipes
+from dishly.search import rank_recipes, filter_recipes
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
 from dishly.keyboards import all_catalog_keyboard
@@ -55,6 +55,12 @@ class SearchTests(unittest.TestCase):
         self.assertEqual({row[1]["id"] for row in microwave},{"microwave-oatmeal","microwave-mug-cake"})
         self.assertEqual({row[1]["id"] for row in airfryer},{"airfryer-potatoes","airfryer-chicken"})
         self.assertIn("chicken-noodle-soup",{row[1]["id"] for row in pots})
+
+    def test_interactive_filters_require_every_selected_condition(self):
+        rows=filter_recipes(RECIPES,ingredients=["банан"],tags=["микроволновка"],max_minutes=10)
+        self.assertEqual([recipe["id"] for recipe in rows],["microwave-oatmeal"])
+        none=filter_recipes(RECIPES,ingredients=["банан","курица"])
+        self.assertEqual(none,[])
 
     def test_cutlets_and_muffins_have_search_facets(self):
         cutlet=parse_query("макароны с котлетами")
