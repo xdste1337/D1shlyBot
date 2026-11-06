@@ -10,7 +10,7 @@ from .config import load_config
 from .database import Database
 from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, catalog_keyboard, catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
 from .parser import parse_query
-from .search import rank_recipes
+from .search import blocked, rank_recipes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 db = None
@@ -92,17 +92,31 @@ async def main():
         s=db.settings(message.from_user.id)
         await message.answer("Настройки\nИсключения: "+(", ".join(s["excluded"]) or "нет"),reply_markup=settings_keyboard(s))
 
-    async def dish_day(message, user_id=None, exclude_shown=True):
-        uid=user_id or message.from_user.id; settings=db.settings(uid); shown=db.shown_today(uid) if exclude_shown else set()
-        candidates=[r for r in db.recipes() if r["id"] not in shown and not __import__("dishly.search",fromlist=["blocked"]).blocked(r,settings["excluded"])]
-        if not candidates:
-            await message.answer("На сегодня варианты закончились. Загляни завтра или попробуй поиск.",reply_markup=main_menu()); return
-        recipe=random.choice(candidates); db.mark_today(uid,recipe["id"]); db.add_history(uid,recipe["id"])
-        await message.answer("🍲 <b>Блюдо дня</b>\n\n"+recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid)))
+    async def dish_day(message, user_id=None, rotate=False, edit=False):
+        uid=user_id or message.from_user.id; settings=db.settings(uid)
+        rid=db.shared_dish_today()
+        if rotate or not rid:
+            seen=db.shared_dishes_seen()
+            candidates=[r for r in db.recipes() if r["id"] not in seen]
+            if not candidates:
+                text="На сегодня все блюда дня уже показаны. Новое появится завтра."
+                if edit: await message.edit_text(text,reply_markup=None)
+                else: await message.answer(text,reply_markup=main_menu())
+                return
+            recipe=random.choice(candidates); db.set_shared_dish_today(recipe["id"]); rid=recipe["id"]
+        recipe=db.get_recipe(rid); db.add_history(uid,rid)
+        if blocked(recipe,settings["excluded"]):
+            text=(f"🍲 <b>Блюдо дня для всех</b>\n\n<b>{recipe['title']}</b> · {recipe['minutes']} мин.\n"
+                  "В рецепте есть продукт из твоих исключений. Чтобы подобрать другой подходящий вариант, воспользуйся поиском.")
+        else:
+            text="🍲 <b>Блюдо дня для всех</b>\n\n"+recipe_text(recipe,settings["servings"])
+        markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid))
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+        else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
     @dp.callback_query(F.data=="daymore")
     async def another_dish(call):
-        await dish_day(call.message,call.from_user.id)
+        await dish_day(call.message,call.from_user.id,rotate=True,edit=True)
         await call.answer()
 
     @dp.callback_query(F.data.startswith("catalogopen:"))

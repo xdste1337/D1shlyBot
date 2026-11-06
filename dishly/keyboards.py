@@ -11,8 +11,12 @@ def result_keyboard(rid, offset=None):
 def catalog_keyboard(recipes, offset=0, has_more=False):
     rows = [[InlineKeyboardButton(text=f"{i}. {r['title']}", callback_data=f"catalogopen:{offset}:{r['id']}")]
             for i, r in enumerate(recipes, offset + 1)]
+    nav=[]
+    if offset > 0:
+        nav.append(InlineKeyboardButton(text="← Назад", callback_data=f"catalog:{max(0, offset - 5)}"))
     if has_more:
-        rows.append([InlineKeyboardButton(text="Другие рецепты →", callback_data=f"catalog:{offset + len(recipes)}")])
+        nav.append(InlineKeyboardButton(text="Другие рецепты →", callback_data=f"catalog:{offset + len(recipes)}"))
+    if nav: rows.append(nav)
     rows.append([InlineKeyboardButton(text="В меню", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

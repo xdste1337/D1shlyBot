@@ -3,6 +3,7 @@ import unittest
 from dishly.parser import parse_query
 from dishly.search import rank_recipes
 from dishly.data.recipes import RECIPES
+from dishly.database import Database
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -47,6 +48,13 @@ class SearchTests(unittest.TestCase):
         muffin_rows=rank_recipes(RECIPES,muffin,limit=5)
         self.assertEqual(cutlet_rows[0][1]["id"],"pasta-cutlets")
         self.assertEqual(muffin_rows[0][1]["id"],"apple-muffins")
+
+class SharedDishTests(unittest.TestCase):
+    def test_daily_dish_is_shared_and_variants_do_not_repeat(self):
+        database=Database(":memory:")
+        database.set_shared_dish_today("omelet-tomato")
+        self.assertEqual(database.shared_dish_today(),"omelet-tomato")
+        self.assertEqual(database.shared_dishes_seen(),{"omelet-tomato"})
 
 if __name__=="__main__": unittest.main()
 

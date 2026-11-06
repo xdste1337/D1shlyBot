@@ -19,6 +19,8 @@ class Database:
         CREATE TABLE IF NOT EXISTS favorites(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,recipe_id));
         CREATE TABLE IF NOT EXISTS history(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), viewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id,recipe_id));
         CREATE TABLE IF NOT EXISTS dish_of_day(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
+        CREATE TABLE IF NOT EXISTS shared_dish_of_day(day TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES recipes(id));
+        CREATE TABLE IF NOT EXISTS shared_dish_seen(day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(day,recipe_id));
         """)
         self.conn.executemany("""
             INSERT INTO recipes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
@@ -81,4 +83,17 @@ class Database:
 
     def mark_today(self, uid, rid):
         self.conn.execute("INSERT OR IGNORE INTO dish_of_day VALUES(?,?,?)",(uid,date.today().isoformat(),rid)); self.conn.commit()
+
+    def shared_dish_today(self):
+        row = self.conn.execute("SELECT recipe_id FROM shared_dish_of_day WHERE day=?",(date.today().isoformat(),)).fetchone()
+        return row[0] if row else None
+
+    def shared_dishes_seen(self):
+        return {r[0] for r in self.conn.execute("SELECT recipe_id FROM shared_dish_seen WHERE day=?",(date.today().isoformat(),))}
+
+    def set_shared_dish_today(self, rid):
+        day=date.today().isoformat()
+        with self.conn:
+            self.conn.execute("INSERT INTO shared_dish_of_day(day,recipe_id) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET recipe_id=excluded.recipe_id",(day,rid))
+            self.conn.execute("INSERT OR IGNORE INTO shared_dish_seen(day,recipe_id) VALUES(?,?)",(day,rid))
 
