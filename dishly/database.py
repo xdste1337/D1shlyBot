@@ -73,10 +73,12 @@ class Database:
         self.conn.commit(); return saved
 
     def add_history(self, uid, rid):
-        self.conn.execute("INSERT INTO history(user_id,recipe_id,viewed_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id,recipe_id) DO UPDATE SET viewed_at=CURRENT_TIMESTAMP",(uid,rid)); self.conn.commit()
+        with self.conn:
+            self.conn.execute("INSERT INTO history(user_id,recipe_id,viewed_at) VALUES(?,?,strftime('%Y-%m-%d %H:%M:%f','now')) ON CONFLICT(user_id,recipe_id) DO UPDATE SET viewed_at=strftime('%Y-%m-%d %H:%M:%f','now')",(uid,rid))
+            self.conn.execute("DELETE FROM history WHERE user_id=? AND recipe_id NOT IN (SELECT recipe_id FROM history WHERE user_id=? ORDER BY viewed_at DESC,rowid DESC LIMIT 10)",(uid,uid))
 
     def history(self, uid):
-        return [self.get_recipe(r[0]) for r in self.conn.execute("SELECT recipe_id FROM history WHERE user_id=? ORDER BY viewed_at DESC LIMIT 20",(uid,))]
+        return [self.get_recipe(r[0]) for r in self.conn.execute("SELECT recipe_id FROM history WHERE user_id=? ORDER BY viewed_at DESC,rowid DESC LIMIT 10",(uid,))]
 
     def shown_today(self, uid):
         return {r[0] for r in self.conn.execute("SELECT recipe_id FROM dish_of_day WHERE user_id=? AND day=?",(uid,date.today().isoformat()))}
