@@ -19,11 +19,14 @@ filter_states = {}
 filter_results = {}
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
-FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус"]
-ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","мясо","орехи","арахис","соя","кунжут","морепродукты"]
+FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты"]
+ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
 
 def user_restrictions(settings):
     return sorted(set(settings["excluded"]) | set(settings["allergies"]))
+
+def normalize_restriction_category(category):
+    return "excluded" if category=="exclude" else category
 
 def recipe_text(recipe, servings=None):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
@@ -123,6 +126,7 @@ async def main():
         await message.answer("Настройки\n"+"\n".join(info),reply_markup=settings_keyboard(s))
 
     async def show_restrictions(message,uid,category,page=0):
+        category=normalize_restriction_category(category)
         s=db.settings(uid)
         if category=="allergies":
             options=ALLERGY_OPTIONS; selected=set(s["allergies"])

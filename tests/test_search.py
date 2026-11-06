@@ -4,10 +4,11 @@ import tempfile
 import os
 
 from dishly.parser import parse_query
-from dishly.search import rank_recipes, filter_recipes
+from dishly.search import rank_recipes, filter_recipes, blocked
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
 from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard
+from dishly.bot import normalize_restriction_category
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -23,6 +24,10 @@ class ParserTests(unittest.TestCase):
 
     def test_unrecognized(self):
         self.assertFalse(parse_query("привет, расскажи анекдот").understood)
+
+    def test_product_exclusion_screen_uses_supported_category_key(self):
+        self.assertEqual(normalize_restriction_category("exclude"),"excluded")
+        self.assertEqual(normalize_restriction_category("allergies"),"allergies")
 
     def test_colloquial_sweet_and_tasty(self):
         q=parse_query("хочу чото вкусненького и сладкого")
@@ -70,6 +75,11 @@ class SearchTests(unittest.TestCase):
         self.assertNotIn(omelet,filter_recipes(RECIPES,user_exclusions=["яйца"]))
         self.assertNotIn(omelet,filter_recipes(RECIPES,user_exclusions=["молочное"]))
         self.assertIn(omelet,filter_recipes(RECIPES,user_exclusions=["грибы"]))
+        hummus=next(recipe for recipe in RECIPES if recipe["id"]=="hummus")
+        shrimp=next(recipe for recipe in RECIPES if recipe["id"]=="shrimp-pasta")
+        self.assertTrue(blocked(hummus,["кунжут"]))
+        self.assertTrue(blocked(shrimp,["морепродукты"]))
+        self.assertTrue(blocked(shrimp,["молочное"]))
 
     def test_cutlets_and_muffins_have_search_facets(self):
         cutlet=parse_query("макароны с котлетами")
