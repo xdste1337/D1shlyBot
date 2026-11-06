@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, catalog_keyboard, catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
+from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, exclusions_keyboard
 from .parser import parse_query
 from .search import blocked, rank_recipes
 
@@ -92,17 +92,12 @@ async def main():
         s=db.settings(message.from_user.id)
         await message.answer("Настройки\nИсключения: "+(", ".join(s["excluded"]) or "нет"),reply_markup=settings_keyboard(s))
 
-    async def dish_day(message, user_id=None, rotate=False, edit=False):
+    async def dish_day(message, user_id=None, edit=False):
         uid=user_id or message.from_user.id; settings=db.settings(uid)
         rid=db.shared_dish_today()
-        if rotate or not rid:
-            seen=db.shared_dishes_seen()
-            candidates=[r for r in db.recipes() if r["id"] not in seen]
-            if not candidates:
-                text="На сегодня все блюда дня уже показаны. Новое появится завтра."
-                if edit: await message.edit_text(text,reply_markup=None)
-                else: await message.answer(text,reply_markup=main_menu())
-                return
+        if not rid:
+            candidates=db.recipes()
+            if not candidates: return
             recipe=random.choice(candidates); db.set_shared_dish_today(recipe["id"]); rid=recipe["id"]
         recipe=db.get_recipe(rid); db.add_history(uid,rid)
         if blocked(recipe,settings["excluded"]):
@@ -114,10 +109,43 @@ async def main():
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
+    async def show_another_dish(message, user_id, edit=True):
+        settings=db.settings(user_id)
+        daily_id=db.shared_dish_today()
+        seen=db.user_alternatives_today(user_id)
+        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and not blocked(r,settings["excluded"])]
+        if not candidates:
+            text="На сегодня больше подходящих вариантов нет. Общее блюдо дня осталось прежним."
+            if edit: await message.edit_text(text,reply_markup=None)
+            else: await message.answer(text,reply_markup=main_menu())
+            return
+        recipe=random.choice(candidates); db.mark_user_alternative(user_id,recipe["id"]); db.add_history(user_id,recipe["id"])
+        saved=any(r["id"]==recipe["id"] for r in db.favorites(user_id))
+        text="🍽 <b>Другой вариант для тебя</b>\n\n"+recipe_text(recipe,settings["servings"])
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
+        else: await message.answer(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
+
     @dp.callback_query(F.data=="daymore")
-    async def another_dish(call):
-        await dish_day(call.message,call.from_user.id,rotate=True,edit=True)
+    async def daymore_handler(call):
+        await show_another_dish(call.message,call.from_user.id)
         await call.answer()
+
+    @dp.callback_query(F.data=="dayhome")
+    async def back_to_shared_dish(call):
+        await dish_day(call.message,call.from_user.id,edit=True)
+        await call.answer("Общее блюдо дня не менялось")
+
+    @dp.callback_query(F.data.startswith("altfav:"))
+    async def alternative_favorite(call):
+        rid=call.data.split(":",1)[1]; saved=db.toggle_favorite(call.from_user.id,rid)
+        await call.message.edit_reply_markup(reply_markup=dish_alternative_keyboard(rid,saved))
+        await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
+
+    @dp.callback_query(F.data.startswith("dayfav:"))
+    async def shared_dish_favorite(call):
+        rid=call.data.split(":",1)[1]; saved=db.toggle_favorite(call.from_user.id,rid)
+        await call.message.edit_reply_markup(reply_markup=dish_day_keyboard(rid,saved))
+        await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("catalogopen:"))
     async def open_catalog_recipe(call):

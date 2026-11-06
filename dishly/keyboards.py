@@ -36,8 +36,17 @@ def recipe_keyboard(rid, saved=False):
 
 def dish_day_keyboard(rid, saved=False):
     kb = recipe_keyboard(rid, saved)
+    kb.inline_keyboard[0][0].callback_data=f"dayfav:{rid}"
     kb.inline_keyboard.insert(2, [InlineKeyboardButton(text="Другой вариант",callback_data="daymore")])
     return kb
+
+def dish_alternative_keyboard(rid, saved=False):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"altfav:{rid}")],
+        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
+        [InlineKeyboardButton(text="Другой вариант",callback_data="daymore")],
+        [InlineKeyboardButton(text="К блюду дня для всех",callback_data="dayhome")],
+    ])
 
 def list_keyboard(recipes, prefix="recipe"):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=r["title"],callback_data=f"{prefix}:{r['id']}")] for r in recipes] + [[InlineKeyboardButton(text="В меню",callback_data="menu")]])

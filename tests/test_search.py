@@ -53,8 +53,10 @@ class SharedDishTests(unittest.TestCase):
     def test_daily_dish_is_shared_and_variants_do_not_repeat(self):
         database=Database(":memory:")
         database.set_shared_dish_today("omelet-tomato")
+        database.mark_user_alternative(123,"apple-muffins")
         self.assertEqual(database.shared_dish_today(),"omelet-tomato")
-        self.assertEqual(database.shared_dishes_seen(),{"omelet-tomato"})
+        self.assertEqual(database.user_alternatives_today(123),{"apple-muffins"})
+        self.assertEqual(database.shared_dish_today(),"omelet-tomato")
 
 if __name__=="__main__": unittest.main()
 
