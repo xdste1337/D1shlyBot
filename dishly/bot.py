@@ -3,10 +3,11 @@ import random
 import re
 import html
 from datetime import date
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
@@ -23,6 +24,7 @@ MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
+HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
 
 def prioritize_selected(options, selected):
     selected=set(selected)
@@ -115,11 +117,16 @@ async def main():
                 lines.append(f"🍲 Блюдо дня: <b>{html.escape(recipe['title'])}</b> · ⏱ {recipe['minutes']} мин.")
         restrictions=user_restrictions(settings)
         if restrictions:
-            lines.append("🛡️ Учту твои ограничения: "+html.escape(", ".join(restrictions))+".")
+            visible=", ".join(restrictions[:4])
+            more=f" и ещё {len(restrictions)-4}" if len(restrictions)>4 else ""
+            lines.append(f"🛡️ Учту твои ограничения: {html.escape(visible)}{more}.")
         lines += ["","💬 Просто напиши, что есть или чего хочется:","🥚 «есть яйца и помидоры»","🍫 «хочу чего-нибудь сладкого»","⚡ «быстрый ужин без духовки»","","👇 Или выбери раздел в меню ниже."]
         text="\n".join(lines)
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=main_menu())
-        else: await message.answer(text,parse_mode="HTML",reply_markup=main_menu())
+        elif HOME_BANNER.is_file():
+            await message.answer_photo(FSInputFile(HOME_BANNER),caption=text,parse_mode="HTML",reply_markup=main_menu())
+        else:
+            await message.answer(text,parse_mode="HTML",reply_markup=main_menu())
 
     @dp.message(CommandStart())
     async def start(message: Message):

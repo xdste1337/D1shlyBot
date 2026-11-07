@@ -8,7 +8,7 @@ from dishly.search import rank_recipes, filter_recipes, blocked, recipe_ingredie
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
 from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard, main_menu, more_menu
-from dishly.bot import normalize_restriction_category
+from dishly.bot import HOME_BANNER, normalize_restriction_category
 from dishly.bot import prioritize_selected
 
 class ParserTests(unittest.TestCase):
@@ -154,6 +154,11 @@ class SharedDishTests(unittest.TestCase):
             os.unlink(path)
 
 class CatalogTests(unittest.TestCase):
+    def test_brand_assets_are_present(self):
+        avatar=HOME_BANNER.parent/"dishly-avatar.png"
+        self.assertTrue(HOME_BANNER.is_file())
+        self.assertTrue(avatar.is_file())
+
     def test_main_menu_keeps_primary_actions_visible_and_groups_secondary_actions(self):
         main={button.text for row in main_menu().keyboard for button in row}
         more={button.text for row in more_menu().keyboard for button in row}
