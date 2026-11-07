@@ -4,7 +4,7 @@ import re
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import BufferedInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
@@ -19,8 +19,13 @@ filter_states = {}
 filter_results = {}
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
-FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты"]
+FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
+recipe_photo_messages = {}
+
+def prioritize_selected(options, selected):
+    selected=set(selected)
+    return sorted(options,key=lambda x:(x not in selected,x))
 
 def user_restrictions(settings):
     return sorted(set(settings["excluded"]) | set(settings["allergies"]))
@@ -39,6 +44,26 @@ def recipe_text(recipe, servings=None):
     lines += [f"{n}. {step}" for n,step in enumerate(recipe["steps"],1)]
     lines += ["", recipe["source"]]
     return "\n".join(lines)
+
+async def clear_recipe_photo(message,user_id):
+    message_id=recipe_photo_messages.pop(user_id,None)
+    if message_id is None: return
+    try:
+        await message.bot.delete_message(chat_id=message.chat.id,message_id=message_id)
+    except Exception as exc:
+        logging.debug("Could not remove previous recipe image: %s",type(exc).__name__)
+
+async def send_recipe_photo(message,user_id,recipe):
+    await clear_recipe_photo(message,user_id)
+    from .images import find_recipe_photo
+    photo=await find_recipe_photo(recipe)
+    if not photo: return
+    image,caption=photo
+    try:
+        sent=await message.answer_photo(BufferedInputFile(image,filename=f"{recipe['id']}.jpg"),caption=caption)
+        recipe_photo_messages[user_id]=sent.message_id
+    except Exception as exc:
+        logging.info("Recipe image could not be sent: %s",type(exc).__name__)
 
 async def show_search(message, offset=0, user_id=None, edit=False):
     uid=user_id or message.from_user.id
@@ -91,6 +116,7 @@ async def main():
 
     @dp.message(F.text)
     async def text_handler(message: Message):
+        await clear_recipe_photo(message,message.from_user.id)
         text=message.text.strip()
         if text in {"Найти рецепт","🔎 Найти рецепт"}:
             await message.answer("Напиши продукты или пожелание, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
@@ -129,10 +155,10 @@ async def main():
         category=normalize_restriction_category(category)
         s=db.settings(uid)
         if category=="allergies":
-            options=ALLERGY_OPTIONS; selected=set(s["allergies"])
+            selected=set(s["allergies"]); options=prioritize_selected(ALLERGY_OPTIONS,selected)
             title="Выбери аллергены. Рецепты с ними будут исключены по составу и аллергенам каталога. Возможные следы аллергенов каталог не описывает."
         else:
-            options=sorted(set(ingredient_filter_options())|{"молочное","глютен","мясо"}); selected=set(s["excluded"])
+            selected=set(s["excluded"]); options=prioritize_selected(set(ingredient_filter_options())|{"молочное","глютен","мясо"},selected)
             title="Отметь продукты, которые не хочешь видеть в рецептах."
         await message.edit_text(title+"\nОтмечено: "+(", ".join(sorted(selected)) or "ничего"),reply_markup=restriction_keyboard(category,options,selected,page))
 
@@ -142,11 +168,13 @@ async def main():
     def ingredient_filter_options():
         return sorted({canonical(item["name"]) for recipe in db.recipes() for item in recipe["ingredients"] if not item.get("optional",False)})
 
-    def filter_options(category):
-        if category=="ingredients": return ingredient_filter_options()
-        if category=="methods": return FILTER_METHODS
-        if category=="moods": return FILTER_MOODS
-        return []
+    def filter_options(category,uid=None):
+        if category=="ingredients": options=ingredient_filter_options()
+        elif category=="methods": options=FILTER_METHODS
+        elif category=="moods": options=FILTER_MOODS
+        else: return []
+        selected=get_filter_state(uid)[category] if uid is not None else set()
+        return prioritize_selected(options,selected)
 
     async def show_filter_home(message,uid,edit=False):
         state=get_filter_state(uid)
@@ -166,7 +194,7 @@ async def main():
             markup=filter_time_keyboard(state["max_minutes"])
         else:
             titles={"ingredients":"Выбери продукты. Будут показаны блюда, в которых есть каждый выбранный продукт:","methods":"Выбери способ приготовления:","moods":"Выбери пожелания к блюду:"}
-            options=filter_options(category)
+            options=filter_options(category,uid)
             selected=state[category]
             text=titles[category]+f"\nВыбрано: {', '.join(sorted(selected)) if selected else 'ничего'}"
             markup=filter_options_keyboard(category,options,selected,page)
@@ -203,8 +231,11 @@ async def main():
         else:
             text="🍲 <b>Блюдо дня для всех</b>\n\n"+recipe_text(recipe,settings["servings"])
         markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid))
+        await clear_recipe_photo(message,uid)
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
+        if not blocked(recipe,user_restrictions(settings)):
+            await send_recipe_photo(message,uid,recipe)
 
     async def show_another_dish(message, user_id, edit=True):
         settings=db.settings(user_id)
@@ -219,18 +250,20 @@ async def main():
         recipe=random.choice(candidates); db.mark_user_alternative(user_id,recipe["id"]); db.add_history(user_id,recipe["id"])
         saved=any(r["id"]==recipe["id"] for r in db.favorites(user_id))
         text="🍽 <b>Другой вариант для тебя</b>\n\n"+recipe_text(recipe,settings["servings"])
+        await clear_recipe_photo(message,user_id)
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
         else: await message.answer(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
+        await send_recipe_photo(message,user_id,recipe)
 
     @dp.callback_query(F.data=="daymore")
     async def daymore_handler(call):
-        await show_another_dish(call.message,call.from_user.id)
         await call.answer()
+        await show_another_dish(call.message,call.from_user.id)
 
     @dp.callback_query(F.data=="dayhome")
     async def back_to_shared_dish(call):
-        await dish_day(call.message,call.from_user.id,edit=True)
         await call.answer("Общее блюдо дня не менялось")
+        await dish_day(call.message,call.from_user.id,edit=True)
 
     @dp.callback_query(F.data.startswith("altfav:"))
     async def alternative_favorite(call):
@@ -253,10 +286,12 @@ async def main():
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved))
         await call.answer()
+        await send_recipe_photo(call.message,call.from_user.id,recipe)
 
     @dp.callback_query(F.data.startswith("catalog:"))
     async def catalog_page(call):
         offset=int(call.data.split(":")[1])
+        await clear_recipe_photo(call.message,call.from_user.id)
         await show_search(call.message,offset,user_id=call.from_user.id,edit=True)
         await call.answer()
 
@@ -276,10 +311,12 @@ async def main():
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=all_catalog_card_keyboard(rid,offset,saved))
         await call.answer()
+        await send_recipe_photo(call.message,call.from_user.id,recipe)
 
     @dp.callback_query(F.data.startswith("allcatalog:"))
     async def all_catalog_page(call):
         offset=int(call.data.split(":")[1])
+        await clear_recipe_photo(call.message,call.from_user.id)
         await show_all_catalog(call.message,offset,user_id=call.from_user.id,edit=True)
         await call.answer()
 
@@ -304,14 +341,14 @@ async def main():
     @dp.callback_query(F.data.startswith("ftoggle:"))
     async def toggle_filter(call):
         _,category,index=call.data.split(":")
-        index=int(index); options=filter_options(category)
+        index=int(index); options=filter_options(category,call.from_user.id)
         if index<0 or index>=len(options): await call.answer("Фильтр не найден",show_alert=True); return
         value=options[index]; selected=get_filter_state(call.from_user.id)[category]
         if value in selected: selected.remove(value)
         else:
             if category=="methods": selected.clear()
             selected.add(value)
-        await show_filter_category(call.message,call.from_user.id,category,index//12)
+        await show_filter_category(call.message,call.from_user.id,category,0)
         await call.answer()
 
     @dp.callback_query(F.data.startswith("ftime:"))
@@ -339,6 +376,7 @@ async def main():
     @dp.callback_query(F.data.startswith("filterpage:"))
     async def filtered_page(call):
         offset=int(call.data.split(":")[1])
+        await clear_recipe_photo(call.message,call.from_user.id)
         await show_filtered_results(call.message,call.from_user.id,offset,edit=True)
         await call.answer()
 
@@ -351,6 +389,7 @@ async def main():
         saved=any(item["id"]==rid for item in db.favorites(call.from_user.id))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=filtered_card_keyboard(rid,offset,saved))
         await call.answer()
+        await send_recipe_photo(call.message,call.from_user.id,recipe)
 
     @dp.callback_query(F.data.startswith("filterfav:"))
     async def filtered_favorite(call):
@@ -365,7 +404,9 @@ async def main():
         if not r: await call.answer("Рецепт не найден",show_alert=True); return
         db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
         fav=any(x["id"]==rid for x in db.favorites(call.from_user.id))
-        await call.message.answer(recipe_text(r,settings["servings"]),parse_mode="HTML",reply_markup=recipe_keyboard(rid,fav)); await call.answer()
+        await call.message.answer(recipe_text(r,settings["servings"]),parse_mode="HTML",reply_markup=recipe_keyboard(rid,fav))
+        await call.answer()
+        await send_recipe_photo(call.message,call.from_user.id,r)
 
     @dp.callback_query(F.data.startswith("fav:"))
     async def favorite(call):
@@ -418,17 +459,18 @@ async def main():
     @dp.callback_query(F.data.startswith("rtoggle:"))
     async def toggle_restriction(call):
         _,category,index=call.data.split(":"); index=int(index)
-        if category=="allergies": options=ALLERGY_OPTIONS
-        elif category=="excluded": options=sorted(set(ingredient_filter_options())|{"молочное","глютен","мясо"})
+        s=db.settings(call.from_user.id)
+        if category=="allergies": options=prioritize_selected(ALLERGY_OPTIONS,s["allergies"])
+        elif category=="excluded": options=prioritize_selected(set(ingredient_filter_options())|{"молочное","глютен","мясо"},s["excluded"])
         else: await call.answer("Раздел не найден",show_alert=True); return
         if index<0 or index>=len(options): await call.answer("Пункт не найден",show_alert=True); return
-        s=db.settings(call.from_user.id); field="allergies" if category=="allergies" else "excluded"
+        field="allergies" if category=="allergies" else "excluded"
         values=set(s[field]); value=options[index]
         if value in values: values.remove(value)
         else: values.add(value)
         if field=="allergies": db.set_allergies(call.from_user.id,sorted(values))
         else: db.set_excluded(call.from_user.id,sorted(values))
-        await show_restrictions(call.message,call.from_user.id,category,index//12); await call.answer()
+        await show_restrictions(call.message,call.from_user.id,category,0); await call.answer()
 
     @dp.errors()
     async def errors(event):

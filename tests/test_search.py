@@ -9,6 +9,8 @@ from dishly.data.recipes import RECIPES
 from dishly.database import Database
 from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard
 from dishly.bot import normalize_restriction_category
+from dishly.bot import prioritize_selected
+from dishly.images import image_search_query
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -75,6 +77,13 @@ class SearchTests(unittest.TestCase):
         none=filter_recipes(RECIPES,ingredients=["банан","курица"])
         self.assertEqual(none,[])
 
+    def test_equipment_filters_include_every_recipe_using_that_method(self):
+        for method in ("микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"):
+            with self.subTest(method=method):
+                actual={recipe["id"] for recipe in filter_recipes(RECIPES,tags=[method])}
+                expected={recipe["id"] for recipe in RECIPES if recipe["method"]==method}
+                self.assertTrue(expected.issubset(actual))
+
     def test_allergy_and_excluded_ingredients_filter_recipes(self):
         omelet=next(recipe for recipe in RECIPES if recipe["id"]=="omelet-tomato")
         self.assertNotIn(omelet,filter_recipes(RECIPES,user_exclusions=["яйца"]))
@@ -85,6 +94,33 @@ class SearchTests(unittest.TestCase):
         self.assertTrue(blocked(hummus,["кунжут"]))
         self.assertTrue(blocked(shrimp,["морепродукты"]))
         self.assertTrue(blocked(shrimp,["молочное"]))
+        barley=next(recipe for recipe in RECIPES if any(i["name"]=="перловка" for i in recipe["ingredients"]))
+        self.assertTrue(blocked(barley,["глютен"]))
+
+    def test_meat_exclusion_and_vegetarian_tag_remove_meat_fish_and_seafood(self):
+        meat_terms={"мясо","курица","фарш","котлеты","говядина","свинина","индейка","баранина","бекон","сосиски","колбаса"}
+        fish_terms={"рыба","тунец","лосось","сельдь","креветки","креветка","мидии","краб","кальмар"}
+        meat_free=filter_recipes(RECIPES,user_exclusions=["мясо"])
+        vegetarian=filter_recipes(RECIPES,tags=["вегетарианское"])
+        self.assertTrue(all(not ({i["name"] for i in recipe["ingredients"]}&meat_terms) for recipe in meat_free))
+        self.assertTrue(all(not ({i["name"] for i in recipe["ingredients"]}&(meat_terms|fish_terms)) for recipe in vegetarian))
+
+    def test_baking_filter_finds_pastries_and_bakes(self):
+        ids={recipe["id"] for recipe in filter_recipes(RECIPES,tags=["выпечка"])}
+        self.assertTrue({"apple-muffins","curd-casserole","potato-cheese-bake","lavash-pizza","pear-cake"}.issubset(ids))
+        self.assertNotIn("chicken-potato-bake",ids)
+
+    def test_soup_and_salad_titles_have_the_matching_filter_tag(self):
+        for recipe in RECIPES:
+            title=recipe["title"].casefold()
+            if "суп" in title: self.assertIn("суп",recipe["tags"],recipe["id"])
+            if "салат" in title: self.assertIn("салат",recipe["tags"],recipe["id"])
+
+    def test_selected_filter_options_are_first_and_photo_query_is_dish_specific(self):
+        ordered=prioritize_selected(["сыр","курица","макароны","яйца"],{"макароны","яйца"})
+        self.assertEqual(ordered[:2],["макароны","яйца"])
+        muffins=next(recipe for recipe in RECIPES if recipe["id"]=="apple-muffins")
+        self.assertIn("muffins",image_search_query(muffins))
 
     def test_cutlets_and_muffins_have_search_facets(self):
         cutlet=parse_query("макароны с котлетами")
@@ -92,7 +128,7 @@ class SearchTests(unittest.TestCase):
         cutlet_rows=rank_recipes(RECIPES,cutlet,limit=5)
         muffin_rows=rank_recipes(RECIPES,muffin,limit=5)
         self.assertEqual(cutlet_rows[0][1]["id"],"pasta-cutlets")
-        self.assertEqual(muffin_rows[0][1]["id"],"apple-muffins")
+        self.assertIn(muffin_rows[0][1]["id"],{"apple-muffins","chocolate-cupcakes","blueberry-muffins","cherry-muffins"})
 
 class SharedDishTests(unittest.TestCase):
     def test_daily_dish_is_shared_and_variants_do_not_repeat(self):
@@ -122,7 +158,9 @@ class SharedDishTests(unittest.TestCase):
 
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_new_detailed_recipes_and_two_way_paging(self):
-        self.assertGreaterEqual(len(RECIPES),30)
+        self.assertEqual(len(RECIPES),100)
+        self.assertEqual(len({recipe["id"] for recipe in RECIPES}),100)
+        self.assertTrue(all(len(recipe["steps"])>=4 for recipe in RECIPES))
         soup=next(recipe for recipe in RECIPES if recipe["id"]=="chicken-noodle-soup")
         self.assertGreaterEqual(len(soup["steps"]),4)
         keyboard=all_catalog_keyboard(RECIPES[5:10],offset=5,has_more=True)
