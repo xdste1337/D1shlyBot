@@ -7,7 +7,7 @@ from dishly.parser import parse_query
 from dishly.search import rank_recipes, filter_recipes, blocked, recipe_ingredients
 from dishly.data.recipes import RECIPES
 from dishly.database import Database
-from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard
+from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard, main_menu, more_menu
 from dishly.bot import normalize_restriction_category
 from dishly.bot import prioritize_selected
 
@@ -154,6 +154,12 @@ class SharedDishTests(unittest.TestCase):
             os.unlink(path)
 
 class CatalogTests(unittest.TestCase):
+    def test_main_menu_keeps_primary_actions_visible_and_groups_secondary_actions(self):
+        main={button.text for row in main_menu().keyboard for button in row}
+        more={button.text for row in more_menu().keyboard for button in row}
+        self.assertTrue({"🍳 Подобрать блюдо","🔎 Фильтры","📚 Каталог","🍲 Блюдо дня","✨ Ещё"}.issubset(main))
+        self.assertTrue({"⭐ Избранное","🕘 История","⚙️ Настройки","❔ Помощь","🏠 Главное меню"}.issubset(more))
+
     def test_catalog_has_new_detailed_recipes_and_two_way_paging(self):
         self.assertEqual(len(RECIPES),100)
         self.assertEqual(len({recipe["id"] for recipe in RECIPES}),100)

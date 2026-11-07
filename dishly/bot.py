@@ -1,6 +1,8 @@
 import logging
 import random
 import re
+import html
+from datetime import date
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -8,7 +10,7 @@ from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, canonical
 
@@ -84,32 +86,73 @@ async def main():
     config=load_config(); db=Database(config.database_path)
     bot=Bot(config.bot_token); dp=Dispatcher()
 
+    def get_shared_dish():
+        rid=db.shared_dish_today()
+        if not rid:
+            candidates=db.recipes()
+            if not candidates: return None
+            recipe=random.choice(candidates); db.set_shared_dish_today(recipe["id"]); rid=recipe["id"]
+        return db.get_recipe(rid)
+
+    async def show_home(message,uid,first_name="",edit=False):
+        greetings=[
+            "Сегодня на кухне пахнет чем-то вкусным 😋",
+            "Новый день — новый повод приготовить что-нибудь классное ✨",
+            "Заглянем в холодильник и придумаем вкусный план? 🥕",
+            "Кулинарное вдохновение уже здесь! 👩‍🍳",
+            "Что сегодня будет на тарелке? Давай выберем 🍽️",
+            "Пора устроить маленький праздник на кухне 🎉",
+            "Привет с кухни Dishly! Выбирай идею и готовь с удовольствием 💛",
+        ]
+        greeting=greetings[date.today().toordinal()%len(greetings)]
+        name=f" {html.escape(first_name)}" if first_name else ""
+        settings=db.settings(uid); recipe=get_shared_dish()
+        lines=[f"👋 <b>Привет{name}!</b>",greeting,"",f"📚 В каталоге уже <b>{len(db.recipes())}</b> идей для готовки."]
+        if recipe:
+            if blocked(recipe,user_restrictions(settings)):
+                lines.append("🍲 Блюдо дня выбрано для всех, а я учту твои ограничения и не буду предлагать неподходящие рецепты.")
+            else:
+                lines.append(f"🍲 Блюдо дня: <b>{html.escape(recipe['title'])}</b> · ⏱ {recipe['minutes']} мин.")
+        restrictions=user_restrictions(settings)
+        if restrictions:
+            lines.append("🛡️ Учту твои ограничения: "+html.escape(", ".join(restrictions))+".")
+        lines += ["","💬 Просто напиши, что есть или чего хочется:","🥚 «есть яйца и помидоры»","🍫 «хочу чего-нибудь сладкого»","⚡ «быстрый ужин без духовки»","","👇 Или выбери раздел в меню ниже."]
+        text="\n".join(lines)
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=main_menu())
+        else: await message.answer(text,parse_mode="HTML",reply_markup=main_menu())
+
     @dp.message(CommandStart())
     async def start(message: Message):
         db.ensure_user(message.from_user.id)
-        await message.answer("Привет! Я Dishly — помогу выбрать блюдо по продуктам или настроению. Ищу только в каталоге рецептов. Напиши, например: «яйца, помидоры» или «быстрое без духовки».",reply_markup=main_menu())
+        await show_home(message,message.from_user.id,message.from_user.first_name or "")
 
     @dp.message(Command("help"))
     async def help_cmd(message):
-        await message.answer("Напиши продукты или пожелания: «сытное из курицы без духовки». Можно открыть рецепт кнопкой из выдачи.",reply_markup=main_menu())
+        await message.answer("💡 Напиши продукты или пожелания обычным текстом: «сытное из курицы без духовки». Ещё можно искать через фильтры, листать каталог и сохранять любимые рецепты ⭐",reply_markup=main_menu())
 
     @dp.message(F.text)
     async def text_handler(message: Message):
         text=message.text.strip()
-        if text in {"Найти рецепт","🔎 Найти рецепт"}:
-            await message.answer("Напиши продукты или пожелание, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
-        if text=="Все рецепты":
+        if text in {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт"}:
+            await message.answer("🍳 Напиши продукты или настроение, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
+        if text in {"📚 Каталог","Все рецепты"}:
             await show_all_catalog(message); return
-        if text=="Фильтры":
+        if text in {"🔎 Фильтры","Фильтры"}:
             await show_filter_home(message,message.from_user.id); return
-        if text=="Блюдо дня":
+        if text in {"🍲 Блюдо дня","Блюдо дня"}:
             await dish_day(message); return
-        if text=="Избранное":
-            await show_list(message,"Избранное",db.favorites(message.from_user.id)); return
-        if text=="История":
-            await show_list(message,"Недавно просмотренные",db.history(message.from_user.id)); return
-        if text=="Настройки":
+        if text=="✨ Ещё":
+            await message.answer("🧰 Дополнительные разделы Dishly",reply_markup=more_menu()); return
+        if text=="🏠 Главное меню":
+            await show_home(message,message.from_user.id,message.from_user.first_name or ""); return
+        if text in {"⭐ Избранное","Избранное"}:
+            await show_list(message,"⭐ Избранное",db.favorites(message.from_user.id)); return
+        if text in {"🕘 История","История"}:
+            await show_list(message,"🕘 Недавно просмотренные",db.history(message.from_user.id)); return
+        if text in {"⚙️ Настройки","Настройки"}:
             await show_settings(message); return
+        if text=="❔ Помощь":
+            await help_cmd(message); return
         if len(text)>MAX_INPUT:
             await message.answer(f"Запрос слишком длинный. Сократи его до {MAX_INPUT} символов."); return
         query=parse_query(text)
@@ -197,12 +240,9 @@ async def main():
 
     async def dish_day(message, user_id=None, edit=False):
         uid=user_id or message.from_user.id; settings=db.settings(uid)
-        rid=db.shared_dish_today()
-        if not rid:
-            candidates=db.recipes()
-            if not candidates: return
-            recipe=random.choice(candidates); db.set_shared_dish_today(recipe["id"]); rid=recipe["id"]
-        recipe=db.get_recipe(rid); db.add_history(uid,rid)
+        recipe=get_shared_dish()
+        if not recipe: return
+        rid=recipe["id"]; db.add_history(uid,rid)
         if blocked(recipe,user_restrictions(settings)):
             text=(f"🍲 <b>Блюдо дня для всех</b>\n\n<b>{recipe['title']}</b> · {recipe['minutes']} мин.\n"
                   "В рецепте есть продукт из твоих исключений. Чтобы подобрать другой подходящий вариант, воспользуйся поиском.")
@@ -386,7 +426,8 @@ async def main():
 
     @dp.callback_query(F.data=="menu")
     async def menu(call):
-        await call.message.answer("Главное меню",reply_markup=main_menu()); await call.answer()
+        await show_home(call.message,call.from_user.id,call.from_user.first_name or "")
+        await call.answer()
 
     @dp.callback_query(F.data.startswith("hint:"))
     async def hint(call):

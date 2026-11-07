@@ -1,7 +1,18 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 def main_menu():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Найти рецепт"),KeyboardButton(text="Фильтры")],[KeyboardButton(text="Все рецепты"),KeyboardButton(text="Блюдо дня")],[KeyboardButton(text="Избранное"),KeyboardButton(text="История")],[KeyboardButton(text="Настройки")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🍳 Подобрать блюдо"),KeyboardButton(text="🔎 Фильтры")],
+        [KeyboardButton(text="📚 Каталог"),KeyboardButton(text="🍲 Блюдо дня")],
+        [KeyboardButton(text="✨ Ещё")],
+    ],resize_keyboard=True)
+
+def more_menu():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],
+        [KeyboardButton(text="⚙️ Настройки"),KeyboardButton(text="❔ Помощь")],
+        [KeyboardButton(text="🏠 Главное меню")],
+    ],resize_keyboard=True)
 
 def result_keyboard(rid, offset=None):
     rows=[[InlineKeyboardButton(text="Открыть рецепт",callback_data=f"recipe:{rid}")]]
