@@ -4,7 +4,7 @@ import re
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
@@ -21,7 +21,6 @@ MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
-recipe_photo_messages = {}
 
 def prioritize_selected(options, selected):
     selected=set(selected)
@@ -44,26 +43,6 @@ def recipe_text(recipe, servings=None):
     lines += [f"{n}. {step}" for n,step in enumerate(recipe["steps"],1)]
     lines += ["", recipe["source"]]
     return "\n".join(lines)
-
-async def clear_recipe_photo(message,user_id):
-    message_id=recipe_photo_messages.pop(user_id,None)
-    if message_id is None: return
-    try:
-        await message.bot.delete_message(chat_id=message.chat.id,message_id=message_id)
-    except Exception as exc:
-        logging.debug("Could not remove previous recipe image: %s",type(exc).__name__)
-
-async def send_recipe_photo(message,user_id,recipe):
-    await clear_recipe_photo(message,user_id)
-    from .images import find_recipe_photo
-    photo=await find_recipe_photo(recipe)
-    if not photo: return
-    image,caption=photo
-    try:
-        sent=await message.answer_photo(BufferedInputFile(image,filename=f"{recipe['id']}.jpg"),caption=caption)
-        recipe_photo_messages[user_id]=sent.message_id
-    except Exception as exc:
-        logging.info("Recipe image could not be sent: %s",type(exc).__name__)
 
 async def show_search(message, offset=0, user_id=None, edit=False):
     uid=user_id or message.from_user.id
@@ -116,7 +95,6 @@ async def main():
 
     @dp.message(F.text)
     async def text_handler(message: Message):
-        await clear_recipe_photo(message,message.from_user.id)
         text=message.text.strip()
         if text in {"Найти рецепт","🔎 Найти рецепт"}:
             await message.answer("Напиши продукты или пожелание, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
@@ -231,11 +209,8 @@ async def main():
         else:
             text="🍲 <b>Блюдо дня для всех</b>\n\n"+recipe_text(recipe,settings["servings"])
         markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid))
-        await clear_recipe_photo(message,uid)
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
-        if not blocked(recipe,user_restrictions(settings)):
-            await send_recipe_photo(message,uid,recipe)
 
     async def show_another_dish(message, user_id, edit=True):
         settings=db.settings(user_id)
@@ -250,10 +225,8 @@ async def main():
         recipe=random.choice(candidates); db.mark_user_alternative(user_id,recipe["id"]); db.add_history(user_id,recipe["id"])
         saved=any(r["id"]==recipe["id"] for r in db.favorites(user_id))
         text="🍽 <b>Другой вариант для тебя</b>\n\n"+recipe_text(recipe,settings["servings"])
-        await clear_recipe_photo(message,user_id)
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
         else: await message.answer(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
-        await send_recipe_photo(message,user_id,recipe)
 
     @dp.callback_query(F.data=="daymore")
     async def daymore_handler(call):
@@ -286,12 +259,10 @@ async def main():
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved))
         await call.answer()
-        await send_recipe_photo(call.message,call.from_user.id,recipe)
 
     @dp.callback_query(F.data.startswith("catalog:"))
     async def catalog_page(call):
         offset=int(call.data.split(":")[1])
-        await clear_recipe_photo(call.message,call.from_user.id)
         await show_search(call.message,offset,user_id=call.from_user.id,edit=True)
         await call.answer()
 
@@ -311,12 +282,10 @@ async def main():
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=all_catalog_card_keyboard(rid,offset,saved))
         await call.answer()
-        await send_recipe_photo(call.message,call.from_user.id,recipe)
 
     @dp.callback_query(F.data.startswith("allcatalog:"))
     async def all_catalog_page(call):
         offset=int(call.data.split(":")[1])
-        await clear_recipe_photo(call.message,call.from_user.id)
         await show_all_catalog(call.message,offset,user_id=call.from_user.id,edit=True)
         await call.answer()
 
@@ -376,7 +345,6 @@ async def main():
     @dp.callback_query(F.data.startswith("filterpage:"))
     async def filtered_page(call):
         offset=int(call.data.split(":")[1])
-        await clear_recipe_photo(call.message,call.from_user.id)
         await show_filtered_results(call.message,call.from_user.id,offset,edit=True)
         await call.answer()
 
@@ -389,7 +357,6 @@ async def main():
         saved=any(item["id"]==rid for item in db.favorites(call.from_user.id))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=filtered_card_keyboard(rid,offset,saved))
         await call.answer()
-        await send_recipe_photo(call.message,call.from_user.id,recipe)
 
     @dp.callback_query(F.data.startswith("filterfav:"))
     async def filtered_favorite(call):
@@ -406,7 +373,6 @@ async def main():
         fav=any(x["id"]==rid for x in db.favorites(call.from_user.id))
         await call.message.answer(recipe_text(r,settings["servings"]),parse_mode="HTML",reply_markup=recipe_keyboard(rid,fav))
         await call.answer()
-        await send_recipe_photo(call.message,call.from_user.id,r)
 
     @dp.callback_query(F.data.startswith("fav:"))
     async def favorite(call):

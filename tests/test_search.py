@@ -10,7 +10,6 @@ from dishly.database import Database
 from dishly.keyboards import all_catalog_keyboard, filter_options_keyboard
 from dishly.bot import normalize_restriction_category
 from dishly.bot import prioritize_selected
-from dishly.images import image_search_query
 
 class ParserTests(unittest.TestCase):
     def test_mixed_query(self):
@@ -116,11 +115,9 @@ class SearchTests(unittest.TestCase):
             if "суп" in title: self.assertIn("суп",recipe["tags"],recipe["id"])
             if "салат" in title: self.assertIn("салат",recipe["tags"],recipe["id"])
 
-    def test_selected_filter_options_are_first_and_photo_query_is_dish_specific(self):
+    def test_selected_filter_options_are_first(self):
         ordered=prioritize_selected(["сыр","курица","макароны","яйца"],{"макароны","яйца"})
         self.assertEqual(ordered[:2],["макароны","яйца"])
-        muffins=next(recipe for recipe in RECIPES if recipe["id"]=="apple-muffins")
-        self.assertIn("muffins",image_search_query(muffins))
 
     def test_cutlets_and_muffins_have_search_facets(self):
         cutlet=parse_query("макароны с котлетами")
