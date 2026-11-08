@@ -64,7 +64,8 @@ def recipe_text(recipe, servings=None, available_ingredients=None, user_exclusio
     lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.",f"Способ: {recipe['method']}"]
     lines += ["", "<b>Ингредиенты</b>"]
     for i in recipe["ingredients"]:
-        amount = round(i["amount"]*ratio, 1)
+        scaled_amount=i["amount"]*ratio
+        amount=max(1,int(scaled_amount+0.5)) if i["unit"]=="шт" else round(scaled_amount,1)
         lines.append(f"• {i['name']}: {amount:g} {i['unit']}" + (" (по желанию)" if i.get("optional") else ""))
     if available_ingredients is not None:
         missing=recipe_ingredients(recipe)-{canonical(name) for name in available_ingredients}
