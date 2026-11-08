@@ -29,7 +29,7 @@ pantry_results = set()
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
-FILTER_MOODS = ["сладкое","сытное","полезное","правильное питание","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
+FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
 MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
@@ -325,7 +325,9 @@ async def main():
         state=get_filter_state(uid)
         selected=[]
         for key,title in (("ingredients","продукты"),("methods","способ"),("moods","пожелания")):
-            if state[key]: selected.append(title+": "+", ".join(sorted(state[key])))
+            if state[key]:
+                values=["Полезное / ПП" if value=="полезное" else value for value in sorted(state[key])]
+                selected.append(title+": "+", ".join(values))
         if state["max_minutes"]: selected.append(f"время: до {state['max_minutes']} мин.")
         summary="\n".join(selected) if selected else "Пока фильтры не выбраны — покажу весь каталог."
         text="🔎 <b>Фильтры поиска</b>\nВыбери условия. Между разделами действует И: результат должен подходить всем выбранным фильтрам.\n\n"+summary
@@ -341,7 +343,8 @@ async def main():
             titles={"ingredients":"Выбери продукты. Будут показаны блюда, в которых есть каждый выбранный продукт:","methods":"Выбери способ приготовления:","moods":"Выбери пожелания к блюду:"}
             options=filter_options(category,uid)
             selected=state[category]
-            text=titles[category]+f"\nВыбрано: {', '.join(sorted(selected)) if selected else 'ничего'}"
+            selected_labels=["Полезное / ПП" if value=="полезное" else value for value in sorted(selected)]
+            text=titles[category]+f"\nВыбрано: {', '.join(selected_labels) if selected else 'ничего'}"
             markup=filter_options_keyboard(category,options,selected,page)
         await message.edit_text(text,reply_markup=markup)
 

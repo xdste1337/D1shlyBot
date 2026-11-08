@@ -62,6 +62,9 @@ RECIPES.extend(PP_RECIPES)
 # Search facets used by the local filter engine. These are catalog labels, not nutrition claims.
 for recipe in RECIPES:
     tags = set(recipe["tags"]) | {"домашнее"}
+    if tags.intersection({"полезное", "правильное питание", "пп"}):
+        tags.difference_update({"правильное питание", "пп"})
+        tags.add("полезное")
     if recipe["id"] in {"lentil-soup", "chicken-noodle-soup", "broccoli-soup"}:
         recipe["method"] = "кастрюля"
     if recipe["method"] in {"микроволновка", "аэрогриль", "кастрюля", "сковорода", "без готовки"}:

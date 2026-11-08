@@ -77,7 +77,8 @@ def filter_options_keyboard(category, options, selected, page=0, page_size=12):
     buttons=[]
     for idx,label in enumerate(visible,start):
         marker="✓ " if label in selected else ""
-        buttons.append(InlineKeyboardButton(text=marker+label,callback_data=f"ftoggle:{category}:{idx}"))
+        shown="Полезное / ПП" if category=="moods" and label=="полезное" else label
+        buttons.append(InlineKeyboardButton(text=marker+shown,callback_data=f"ftoggle:{category}:{idx}"))
         if len(buttons)==2:
             rows.append(buttons); buttons=[]
     if buttons: rows.append(buttons)
