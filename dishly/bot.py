@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import random
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, Message, CallbackQuery
 
@@ -500,10 +502,18 @@ async def main():
     async def errors(event):
         logging.exception("Unhandled bot error: %s",type(event.exception).__name__)
 
-    logging.info("Dishly polling started")
-    await dp.start_polling(bot)
+    try:
+        while True:
+            try:
+                logging.info("Dishly polling starting")
+                await dp.start_polling(bot, close_bot_session=False)
+                break
+            except TelegramNetworkError:
+                logging.exception("Telegram API is unreachable; retrying in 30 seconds")
+                await asyncio.sleep(30)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
 

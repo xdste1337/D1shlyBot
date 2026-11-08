@@ -2,6 +2,10 @@
 nevpn*
 mihomo.log
 *.sqlite3
+*.sqlite3-*
+*.mrs
+rule-sets/
+*.before-proxy
 __pycache__/
 .pytest_cache/
 *.py[cod]

@@ -50,6 +50,27 @@ Dishly ищет рецепты только в локальном каталог
 
 Не храните токен, VPN-подписку или конфигурацию прокси в Git. Файлы `.env`, `nevpn*` и `mihomo.log` исключены из репозитория.
 
+### Обновление и обслуживание сервера
+
+Из корня проекта обновите код и перезапустите бота:
+
+```bash
+git pull --ff-only
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+sudo systemctl restart dishly.service
+sudo systemctl status dishly.service --no-pager
+```
+
+Прокси Mihomo отдельно перезапускать не нужно, если его конфигурация не менялась. Просмотр последних сообщений бота и прокси:
+
+```bash
+sudo journalctl -u dishly.service -n 60 --no-pager
+sudo journalctl -u mihomo.service -n 40 --no-pager
+```
+
+Если у `git pull` конфликт из-за локальных изменений, сначала проверьте `git status --short`. Не удаляйте `.env`, `dishly.sqlite3` или конфигурацию Mihomo: там находятся настройки и пользовательские данные.
+
 ## Проверка проекта
 
 ```powershell
