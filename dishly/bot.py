@@ -47,7 +47,7 @@ def normalize_restriction_category(category):
 
 def recipe_text(recipe, servings=None):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
-    lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц.",f"Способ: {recipe['method']}"]
+    lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.",f"Способ: {recipe['method']}"]
     lines += ["", "<b>Ингредиенты</b>"]
     for i in recipe["ingredients"]:
         amount = round(i["amount"]*ratio, 1)
@@ -71,7 +71,7 @@ async def show_search(message, offset=0, user_id=None, edit=False):
         return
     lines=[f"📚 <b>Каталог рецептов</b> · запрос: «{raw[:80]}»",""]
     for i,(_,recipe,*_) in enumerate(page,offset+1):
-        lines.append(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин.")
+        lines.append(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал")
     markup=catalog_keyboard([row[1] for row in page],offset,offset+len(page)<len(all_results))
     text="\n".join(lines)
     if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
@@ -87,7 +87,7 @@ async def show_all_catalog(message, offset=0, user_id=None, edit=False):
         return
     start=offset+1; end=offset+len(page)
     text=f"📚 <b>Все рецепты</b> · {start}–{end} из {len(recipes)}\n\n"
-    text+="\n".join(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин." for i,recipe in enumerate(page,start))
+    text+="\n".join(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал" for i,recipe in enumerate(page,start))
     markup=all_catalog_keyboard(page,offset,end<len(recipes))
     if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
     else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
@@ -124,7 +124,7 @@ async def main():
             if blocked(recipe,user_restrictions(settings)):
                 lines.append("🍲 Блюдо дня выбрано для всех, а я учту твои ограничения и не буду предлагать неподходящие рецепты.")
             else:
-                lines.append(f"🍲 Блюдо дня: <b>{html.escape(recipe['title'])}</b> · ⏱ {recipe['minutes']} мин.")
+                lines.append(f"🍲 Блюдо дня: <b>{html.escape(recipe['title'])}</b> · ⏱ {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.")
         restrictions=user_restrictions(settings)
         if restrictions:
             visible=", ".join(restrictions[:4])
@@ -250,7 +250,7 @@ async def main():
         ids=filter_results[uid][offset:offset+5]
         page=[db.get_recipe(rid) for rid in ids]
         text=f"📚 <b>Рецепты по фильтрам</b> · {offset+1}–{offset+len(page)} из {len(recipes)}\n\n"
-        text+="\n".join(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин." for i,recipe in enumerate(page,offset+1))
+        text+="\n".join(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал" for i,recipe in enumerate(page,offset+1))
         markup=filtered_results_keyboard(page,offset,offset+len(page)<len(recipes))
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)

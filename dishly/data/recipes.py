@@ -53,7 +53,9 @@ RECIPES = [
 ]
 
 from .extended_recipes import EXTRA_RECIPES
+from .more_recipes import MORE_RECIPES
 RECIPES.extend(EXTRA_RECIPES)
+RECIPES.extend(MORE_RECIPES)
 
 # Search facets used by the local filter engine. These are catalog labels, not nutrition claims.
 for recipe in RECIPES:
@@ -74,7 +76,7 @@ for recipe in RECIPES:
     if "салат" in title: tags.add("салат")
     tags.difference_update({"вегетарианское", "мясное", "рыбное", "морепродукты"})
     meat = ingredients.intersection({"мясо", "курица", "фарш", "котлеты", "говядина", "свинина", "индейка", "баранина", "бекон", "сосиски", "колбаса"})
-    fish = ingredients.intersection({"рыба", "тунец", "лосось", "сельдь"})
+    fish = ingredients.intersection({"рыба", "тунец", "лосось", "сельдь", "треска"})
     seafood = ingredients.intersection({"креветки", "креветка", "мидии", "краб", "кальмар"})
     if meat: tags.add("мясное")
     if fish: tags.add("рыбное")
@@ -92,8 +94,8 @@ for recipe in RECIPES:
     names={entry["name"] for entry in recipe["ingredients"]}
     allergen_sources={
         "молочное":{"молоко","сыр","йогурт","творог","сливки","сметана","сливочное масло"},
-        "глютен":{"мука","макароны","лапша","хлеб","лаваш","перловка"},
-        "яйца":{"яйца"}, "рыба":{"рыба"}, "морепродукты":{"креветки"},
+        "глютен":{"мука","макароны","лапша","хлеб","лаваш","перловка","булгур","кускус","манка"},
+        "яйца":{"яйца"}, "рыба":{"рыба","лосось","треска","тунец"}, "морепродукты":{"креветки"},
         "кунжут":{"кунжут"}, "орехи":{"миндаль","фундук","грецкий орех"},
         "арахис":{"арахис"}, "соя":{"соя","тофу","соевый соус"},
     }

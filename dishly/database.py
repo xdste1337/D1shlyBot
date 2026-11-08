@@ -3,6 +3,7 @@ import sqlite3
 from datetime import date
 
 from .data.recipes import RECIPES
+from .data.nutrition import estimate_kcal_per_serving
 
 class Database:
     def __init__(self, path):
@@ -46,6 +47,7 @@ class Database:
         result = dict(row)
         for key in ("tags", "allergens", "ingredients", "steps"):
             result[key] = json.loads(result[key])
+        result["kcal_per_serving"] = estimate_kcal_per_serving(result)
         return result
 
     def get_recipe(self, rid):
