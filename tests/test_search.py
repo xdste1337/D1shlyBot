@@ -167,7 +167,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_catalog_has_new_detailed_recipes_and_two_way_paging(self):
         self.assertEqual(len(RECIPES),150)
-        self.assertEqual(len({recipe["id"] for recipe in RECIPES}),100)
+        self.assertEqual(len({recipe["id"] for recipe in RECIPES}),150)
         self.assertTrue(all(len(recipe["steps"])>=4 for recipe in RECIPES))
         soup=next(recipe for recipe in RECIPES if recipe["id"]=="chicken-noodle-soup")
         self.assertGreaterEqual(len(soup["steps"]),4)
