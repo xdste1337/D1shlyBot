@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import re
 import html
@@ -6,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, Message, CallbackQuery
 
@@ -26,9 +28,16 @@ FILTER_MOODS = ["сладкое","сытное","полезное","вегета
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
 
+def russian_sort_key(value):
+    value=value.casefold()
+    return (value.replace("ё","е"),value)
+
+def alphabetize(values):
+    return sorted(set(values),key=russian_sort_key)
+
 def prioritize_selected(options, selected):
     selected=set(selected)
-    return sorted(options,key=lambda x:(x not in selected,x))
+    return sorted(set(options),key=lambda x:(x not in selected,*russian_sort_key(x)))
 
 def user_restrictions(settings):
     return sorted(set(settings["excluded"]) | set(settings["allergies"]))
@@ -86,7 +95,8 @@ async def show_all_catalog(message, offset=0, user_id=None, edit=False):
 async def main():
     global db
     config=load_config(); db=Database(config.database_path)
-    bot=Bot(config.bot_token); dp=Dispatcher()
+    session=AiohttpSession(proxy=os.getenv("TELEGRAM_PROXY") or None)
+    bot=Bot(config.bot_token,session=session); dp=Dispatcher()
 
     def get_shared_dish():
         rid=db.shared_dish_today()
@@ -175,8 +185,8 @@ async def main():
     async def show_settings(message):
         s=db.settings(message.from_user.id)
         info=[]
-        info.append("Аллергии: "+(", ".join(s["allergies"]) or "не указаны"))
-        info.append("Не ем: "+(", ".join(s["excluded"]) or "ничего не исключено"))
+        info.append("Аллергии: "+(", ".join(alphabetize(s["allergies"])) or "не указаны"))
+        info.append("Не ем: "+(", ".join(alphabetize(s["excluded"])) or "ничего не исключено"))
         await message.answer("Настройки\n"+"\n".join(info),reply_markup=settings_keyboard(s))
 
     async def show_restrictions(message,uid,category,page=0):
@@ -188,7 +198,7 @@ async def main():
         else:
             selected=set(s["excluded"]); options=prioritize_selected(set(ingredient_filter_options())|{"молочное","глютен","мясо"},selected)
             title="Отметь продукты, которые не хочешь видеть в рецептах."
-        await message.edit_text(title+"\nОтмечено: "+(", ".join(sorted(selected)) or "ничего"),reply_markup=restriction_keyboard(category,options,selected,page))
+        await message.edit_text(title+"\nОтмечено: "+(", ".join(alphabetize(selected)) or "ничего"),reply_markup=restriction_keyboard(category,options,selected,page))
 
     def get_filter_state(uid):
         return filter_states.setdefault(uid,{"ingredients":set(),"methods":set(),"moods":set(),"max_minutes":None})
@@ -450,7 +460,7 @@ async def main():
             db.set_excluded(call.from_user.id,[]); db.set_allergies(call.from_user.id,[])
             await call.message.edit_text("Аллергии и исключённые продукты сброшены.",reply_markup=settings_keyboard(db.settings(call.from_user.id)))
         elif action=="back":
-            info="Настройки\nАллергии: "+(", ".join(s["allergies"]) or "не указаны")+"\nНе ем: "+(", ".join(s["excluded"]) or "ничего не исключено")
+            info="Настройки\nАллергии: "+(", ".join(alphabetize(s["allergies"])) or "не указаны")+"\nНе ем: "+(", ".join(alphabetize(s["excluded"])) or "ничего не исключено")
             await call.message.edit_text(info,reply_markup=settings_keyboard(s))
         await call.answer()
 

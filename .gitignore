@@ -1,4 +1,6 @@
 .env
+nevpn*
+mihomo.log
 *.sqlite3
 __pycache__/
 .pytest_cache/
