@@ -78,6 +78,11 @@ class Database:
     def set_equipment(self, uid, values):
         self.ensure_user(uid); self.conn.execute("UPDATE users SET equipment=? WHERE user_id=?", (json.dumps(values,ensure_ascii=False),uid)); self.conn.commit()
 
+    def reset_settings(self, uid):
+        self.ensure_user(uid)
+        self.conn.execute("UPDATE users SET servings=2, excluded='[]', allergies='[]', equipment='[]' WHERE user_id=?", (uid,))
+        self.conn.commit()
+
     def favorites(self, uid):
         return [self.get_recipe(r[0]) for r in self.conn.execute("SELECT recipe_id FROM favorites WHERE user_id=? ORDER BY rowid DESC", (uid,))]
 

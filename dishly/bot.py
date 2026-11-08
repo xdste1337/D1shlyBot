@@ -15,7 +15,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -566,6 +566,11 @@ async def main():
         if action in ("servings",): await call.message.edit_text("Выбери число порций:",reply_markup=servings_keyboard())
         elif action in ("exclude","allergies"): await show_restrictions(call.message,call.from_user.id,action)
         elif action=="equipment": await show_equipment(call.message,call.from_user.id)
+        elif action=="restart_setup":
+            text=("🔄 <b>Пройти первичную настройку заново?</b>\n\n"
+                  "Сбросятся число порций, аллергии, исключённые продукты и доступная техника.\n"
+                  "Избранное и история сохранятся.")
+            await call.message.edit_text(text,parse_mode="HTML",reply_markup=setup_reset_keyboard())
         elif action=="clear":
             db.set_excluded(call.from_user.id,[]); db.set_allergies(call.from_user.id,[])
             await call.message.edit_text("Аллергии и исключённые продукты сброшены.",reply_markup=settings_keyboard(db.settings(call.from_user.id)))
@@ -575,6 +580,23 @@ async def main():
                   "\nТехника: "+(", ".join(alphabetize(s["equipment"])) or "подбор не ограничен"))
             await call.message.edit_text(info,reply_markup=settings_keyboard(s))
         await call.answer()
+
+    @dp.callback_query(F.data.startswith("setupreset:"))
+    async def setup_reset_action(call):
+        action=call.data.split(":",1)[1]
+        if action=="confirm":
+            db.reset_settings(call.from_user.id)
+            name=html.escape(call.from_user.first_name or "")
+            greeting=f"👋 Привет, {name}!" if name else "👋 Привет!"
+            text=(f"{greeting}\n\n"
+                  "Я помогу выбрать, что приготовить 🥘\n"
+                  "Укажи порции, аллергии, продукты-исключения и доступную технику.\n\n"
+                  "Любой шаг можно пропустить; настройки потом доступны в разделе «Ещё» → «Настройки».")
+            await call.message.edit_text(text,reply_markup=first_start_keyboard())
+            await call.answer("Настройки сброшены")
+        else:
+            await show_settings(call.message,edit=True)
+            await call.answer("Сброс отменён")
 
     async def show_equipment(message,uid):
         selected=set(db.settings(uid)["equipment"])

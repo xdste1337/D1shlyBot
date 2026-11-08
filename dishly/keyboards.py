@@ -144,12 +144,19 @@ def unknown_keyboard():
 def pantry_prompt_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена",callback_data="pantry:cancel")]])
 
+def setup_reset_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Да, пройти настройку заново",callback_data="setupreset:confirm")],
+        [InlineKeyboardButton(text="Отмена",callback_data="setupreset:cancel")],
+    ])
+
 def settings_keyboard(settings):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"Порций: {settings['servings']} (изменить)",callback_data="settings:servings")],
         [InlineKeyboardButton(text=f"Аллергии · {len(settings['allergies'])}",callback_data="settings:allergies"),InlineKeyboardButton(text=f"Не ем · {len(settings['excluded'])}",callback_data="settings:exclude")],
         [InlineKeyboardButton(text=f"🍳 Техника · {len(settings['equipment']) or 'не ограничивать'}",callback_data="settings:equipment")],
         [InlineKeyboardButton(text="Сбросить ограничения",callback_data="settings:clear")],
+        [InlineKeyboardButton(text="🔄 Пройти настройку заново",callback_data="settings:restart_setup")],
         [InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
 
