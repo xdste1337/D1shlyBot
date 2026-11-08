@@ -69,3 +69,19 @@ def filter_recipes(recipes, ingredients=(), tags=(), max_minutes=None, user_excl
         result.append(recipe)
     return sorted(result,key=lambda recipe:(recipe["minutes"],recipe["title"]))
 
+def rank_pantry_recipes(recipes, available_ingredients, user_exclusions=()):
+    """Rank recipes by pantry overlap and return the required products still missing."""
+    available={canonical(name) for name in available_ingredients}
+    ranked=[]
+    for recipe in recipes:
+        if blocked(recipe,user_exclusions):
+            continue
+        required=recipe_ingredients(recipe)
+        matched=required & available
+        if not matched:
+            continue
+        missing=required - available
+        ranked.append((recipe,matched,missing))
+    ranked.sort(key=lambda row:(bool(row[2]),-len(row[1]),len(row[2]),-len(row[1])/(len(row[1])+len(row[2]) or 1),row[0]["minutes"],row[0]["title"].casefold()))
+    return ranked
+

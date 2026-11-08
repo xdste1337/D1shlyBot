@@ -15,6 +15,7 @@ def first_start_keyboard():
 
 def more_menu():
     return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🧺 Из моих продуктов")],
         [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],
         [KeyboardButton(text="⚙️ Настройки"),KeyboardButton(text="❔ Помощь")],
         [KeyboardButton(text="🏠 Главное меню")],
@@ -139,6 +140,9 @@ def list_keyboard(recipes, prefix="recipe"):
 
 def unknown_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="По ингредиентам",callback_data="hint:ingredients"),InlineKeyboardButton(text="По настроению",callback_data="hint:mood")]])
+
+def pantry_prompt_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена",callback_data="pantry:cancel")]])
 
 def settings_keyboard(settings):
     return InlineKeyboardMarkup(inline_keyboard=[

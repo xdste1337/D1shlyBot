@@ -15,20 +15,23 @@ from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard
 from .parser import parse_query
-from .search import blocked, filter_recipes, rank_recipes, canonical
+from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, canonical
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 db = None
 queries = {}
 filter_states = {}
 filter_results = {}
+pantry_mode = set()
+pantry_results = set()
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
+MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
 
 def russian_sort_key(value):
@@ -74,6 +77,30 @@ async def show_search(message, offset=0, user_id=None, edit=False):
     if not query: return
     settings=db.settings(uid)
     recipes=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+    if uid in pantry_results:
+        all_results=rank_pantry_recipes(recipes,query.ingredients,set(user_restrictions(settings))|set(query.excluded))
+        page=all_results[offset:offset+5]
+        if not page:
+            text="По этим продуктам больше рецептов нет. Попробуй изменить список продуктов."
+            if edit: await message.edit_text(text,reply_markup=None)
+            else: await message.answer(text,reply_markup=main_menu())
+            return
+        lines=[f"🧺 <b>Из твоих продуктов</b> · {offset+1}–{offset+len(page)} из {len(all_results)}",f"Есть: {html.escape(raw[:80])}",""]
+        for i,(recipe,matched,missing) in enumerate(page,offset+1):
+            lines.append(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал")
+            lines.append("✅ Уже есть: "+", ".join(alphabetize(matched)))
+            if missing:
+                missing_sorted=alphabetize(missing)
+                shown=missing_sorted[:4]
+                extra=f" и ещё {len(missing_sorted)-4}" if len(missing_sorted)>4 else ""
+                lines.append("🛒 Понадобится: "+", ".join(shown)+extra)
+            else:
+                lines.append("✅ Основные продукты уже есть")
+        markup=catalog_keyboard([row[0] for row in page],offset,offset+len(page)<len(all_results))
+        text="\n".join(lines)
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+        else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
+        return
     all_results=rank_recipes(recipes,query,user_restrictions(settings),offset=0,limit=100)
     page=all_results[offset:offset+5]
     if not page:
@@ -81,7 +108,7 @@ async def show_search(message, offset=0, user_id=None, edit=False):
         if edit: await message.edit_text(text,reply_markup=None)
         else: await message.answer(text,reply_markup=main_menu())
         return
-    lines=[f"📚 <b>Каталог рецептов</b> · запрос: «{raw[:80]}»",""]
+    lines=[f"📚 <b>Каталог рецептов</b> · запрос: «{html.escape(raw[:80])}»",""]
     for i,(_,recipe,*_) in enumerate(page,offset+1):
         lines.append(f"<b>{i}. {recipe['title']}</b> · {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал")
     markup=catalog_keyboard([row[1] for row in page],offset,offset+len(page)<len(all_results))
@@ -152,6 +179,8 @@ async def main():
 
     @dp.message(CommandStart())
     async def start(message: Message):
+        pantry_mode.discard(message.from_user.id)
+        pantry_results.discard(message.from_user.id)
         is_new_user = db.ensure_user(message.from_user.id)
         if is_new_user:
             name = html.escape(message.from_user.first_name or "")
@@ -171,6 +200,13 @@ async def main():
     @dp.message(F.text)
     async def text_handler(message: Message):
         text=message.text.strip()
+        uid=message.from_user.id
+        if text=="🧺 Из моих продуктов":
+            pantry_mode.add(uid); pantry_results.discard(uid)
+            await message.answer("🧺 Перечисли продукты, которые у тебя есть, через запятую. Например: курица, рис, морковь.\n\nПокажу блюда, где используются эти продукты, и отмечу, что ещё понадобится. Необязательные соль и вода указывать не нужно.",reply_markup=pantry_prompt_keyboard())
+            return
+        if text in MENU_TEXTS:
+            pantry_mode.discard(uid); pantry_results.discard(uid)
         if text in {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт"}:
             await message.answer("🍳 Напиши продукты или настроение, например: «есть яйца и помидоры» или «что-нибудь сладкое до 20 минут»."); return
         if text in {"📚 Каталог","Все рецепты"}:
@@ -191,12 +227,31 @@ async def main():
             await show_settings(message); return
         if text=="❔ Помощь":
             await help_cmd(message); return
+        if uid in pantry_mode:
+            if text.casefold() in {"отмена","отменить","стоп"}:
+                pantry_mode.discard(uid)
+                await message.answer("Подбор по продуктам отменён.",reply_markup=main_menu())
+                return
+            if len(text)>MAX_INPUT:
+                await message.answer(f"Список слишком длинный. Сократи его до {MAX_INPUT} символов.",reply_markup=pantry_prompt_keyboard()); return
+            query=parse_query(text)
+            if not query.ingredients:
+                await message.answer("Не распознал продукты. Напиши основные ингредиенты через запятую, например: яйца, картофель, сыр. Или отправь «Отмена».",reply_markup=pantry_prompt_keyboard()); return
+            settings=db.settings(uid)
+            available=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+            results=rank_pantry_recipes(available,query.ingredients,set(user_restrictions(settings))|set(query.excluded))
+            if not results:
+                await message.answer("Не нашёл подходящих рецептов с этими продуктами и твоими настройками. Попробуй указать меньше продуктов или отправь «Отмена».",reply_markup=pantry_prompt_keyboard()); return
+            pantry_mode.discard(uid); pantry_results.add(uid); queries[uid]=(query,text)
+            await show_search(message,user_id=uid)
+            return
         if len(text)>MAX_INPUT:
             await message.answer(f"Запрос слишком длинный. Сократи его до {MAX_INPUT} символов."); return
         query=parse_query(text)
         if not query.understood:
             await message.answer("Не понял запрос. Напиши продукты или пожелание вроде «быстрое блюдо без духовки».",reply_markup=unknown_keyboard()); return
-        queries[message.from_user.id]=(query,text)
+        pantry_results.discard(uid)
+        queries[uid]=(query,text)
         await show_search(message)
 
     async def show_list(message,title,recipes):
@@ -477,8 +532,17 @@ async def main():
 
     @dp.callback_query(F.data=="menu")
     async def menu(call):
+        pantry_mode.discard(call.from_user.id)
+        pantry_results.discard(call.from_user.id)
         await show_home(call.message,call.from_user.id,call.from_user.first_name or "")
         await call.answer()
+
+    @dp.callback_query(F.data=="pantry:cancel")
+    async def cancel_pantry(call):
+        pantry_mode.discard(call.from_user.id)
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.message.edit_text("Подбор по продуктам отменён.")
+        await call.answer("Отменено")
 
     @dp.callback_query(F.data.startswith("hint:"))
     async def hint(call):
