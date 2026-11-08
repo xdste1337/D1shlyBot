@@ -17,7 +17,7 @@ from .config import load_config
 from .database import Database
 from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard
 from .parser import parse_query
-from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, canonical
+from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 db = None
@@ -59,13 +59,20 @@ def suitable_for_equipment(recipe, equipment):
 def normalize_restriction_category(category):
     return "excluded" if category=="exclude" else category
 
-def recipe_text(recipe, servings=None):
+def recipe_text(recipe, servings=None, available_ingredients=None, user_exclusions=()):
     ratio = (servings or recipe["servings"]) / recipe["servings"]
     lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.",f"Способ: {recipe['method']}"]
     lines += ["", "<b>Ингредиенты</b>"]
     for i in recipe["ingredients"]:
         amount = round(i["amount"]*ratio, 1)
         lines.append(f"• {i['name']}: {amount:g} {i['unit']}" + (" (по желанию)" if i.get("optional") else ""))
+    if available_ingredients is not None:
+        missing=recipe_ingredients(recipe)-{canonical(name) for name in available_ingredients}
+        substitutions=pantry_substitutions(missing,available_ingredients,user_exclusions)
+        if substitutions:
+            lines += ["", "<b>Возможные замены из твоих продуктов</b>"]
+            lines += [f"• Вместо {source} можно попробовать {alternative}." for source,alternative in substitutions]
+            lines.append("Замена может немного изменить вкус или текстуру.")
     lines += ["", "<b>Приготовление</b>"]
     lines += [f"{n}. {step}" for n,step in enumerate(recipe["steps"],1)]
     lines += ["", recipe["source"]]
@@ -94,6 +101,9 @@ async def show_search(message, offset=0, user_id=None, edit=False):
                 shown=missing_sorted[:4]
                 extra=f" и ещё {len(missing_sorted)-4}" if len(missing_sorted)>4 else ""
                 lines.append("🛒 Понадобится: "+", ".join(shown)+extra)
+                substitutions=pantry_substitutions(missing,query.ingredients,user_restrictions(settings))
+                if substitutions:
+                    lines.append("🔁 Можно попробовать заменить: "+"; ".join(f"{source} → {alternative}" for source,alternative in substitutions))
             else:
                 lines.append("✅ Основные продукты уже есть")
         markup=catalog_keyboard([row[0] for row in page],offset,offset+len(page)<len(all_results))
@@ -403,7 +413,8 @@ async def main():
         if not recipe: await call.answer("Рецепт не найден",show_alert=True); return
         db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
-        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved))
+        available=queries.get(call.from_user.id,(None,""))[0].ingredients if call.from_user.id in pantry_results and call.from_user.id in queries else None
+        await call.message.edit_text(recipe_text(recipe,settings["servings"],available,user_restrictions(settings)),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved))
         await call.answer()
 
     @dp.callback_query(F.data.startswith("catalog:"))

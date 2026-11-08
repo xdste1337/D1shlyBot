@@ -1,4 +1,5 @@
 from .data.vocabulary import EXCLUSION_GROUPS
+from .data.substitutions import SUBSTITUTIONS
 
 ALIASES = {"сливочное масло":"масло"}
 
@@ -84,4 +85,20 @@ def rank_pantry_recipes(recipes, available_ingredients, user_exclusions=()):
         ranked.append((recipe,matched,missing))
     ranked.sort(key=lambda row:(bool(row[2]),-len(row[1]),len(row[2]),-len(row[1])/(len(row[1])+len(row[2]) or 1),row[0]["minutes"],row[0]["title"].casefold()))
     return ranked
+
+def pantry_substitutions(missing_ingredients, available_ingredients, user_exclusions=(), limit=2):
+    available={canonical(name) for name in available_ingredients}
+    substitutions=[]
+    for missing in sorted(missing_ingredients):
+        for alternative in SUBSTITUTIONS.get(canonical(missing),[]):
+            if alternative not in available:
+                continue
+            candidate={"ingredients":[{"name":alternative,"optional":False}],"allergens":[],"tags":[]}
+            if blocked(candidate,user_exclusions):
+                continue
+            substitutions.append((missing,alternative))
+            break
+        if len(substitutions)>=limit:
+            break
+    return substitutions
 
