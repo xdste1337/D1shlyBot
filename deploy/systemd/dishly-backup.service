@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily backup of Dishly SQLite database
+
+[Service]
+Type=oneshot
+User=keka
+Group=keka
+ExecStart=/usr/bin/python3 /usr/local/bin/dishly-backup-db.py

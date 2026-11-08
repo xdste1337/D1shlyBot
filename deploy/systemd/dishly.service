@@ -1,0 +1,17 @@
+[Unit]
+Description=Dishly Telegram bot
+After=network-online.target mihomo.service
+Wants=network-online.target
+Requires=mihomo.service
+
+[Service]
+Type=simple
+User=keka
+WorkingDirectory=/home/keka/D1shlyBot
+EnvironmentFile=/home/keka/D1shlyBot/.env
+ExecStart=/home/keka/D1shlyBot/.venv/bin/python -m dishly.bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

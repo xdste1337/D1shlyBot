@@ -1,0 +1,15 @@
+[Unit]
+Description=Mihomo proxy for Dishly
+After=network-online.target
+Wants=network-online.target dishly.service
+
+[Service]
+Type=simple
+User=keka
+WorkingDirectory=/home/keka/D1shlyBot
+ExecStart=/usr/local/bin/mihomo -d /home/keka/D1shlyBot -f /home/keka/D1shlyBot/nevpn.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
