@@ -55,7 +55,9 @@ class Database:
         return self._dict(row) if row else None
 
     def ensure_user(self, uid):
-        self.conn.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (uid,)); self.conn.commit()
+        cursor = self.conn.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (uid,))
+        self.conn.commit()
+        return cursor.rowcount == 1
 
     def settings(self, uid):
         self.ensure_user(uid)

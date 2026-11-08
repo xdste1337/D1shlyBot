@@ -15,7 +15,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, canonical
 
@@ -142,7 +142,16 @@ async def main():
 
     @dp.message(CommandStart())
     async def start(message: Message):
-        db.ensure_user(message.from_user.id)
+        is_new_user = db.ensure_user(message.from_user.id)
+        if is_new_user:
+            name = html.escape(message.from_user.first_name or "")
+            greeting = f"👋 Привет, {name}!" if name else "👋 Привет!"
+            text = (f"{greeting}\n\n"
+                    "Я помогу выбрать, что приготовить 🥘\n"
+                    "Перед началом можно указать порции, аллергии и продукты, которые лучше исключить.\n\n"
+                    "Это необязательно: настройки можно пропустить и изменить позже в разделе «Ещё» → «Настройки».")
+            await message.answer(text,reply_markup=first_start_keyboard())
+            return
         await show_home(message,message.from_user.id,message.from_user.first_name or "")
 
     @dp.message(Command("help"))
@@ -184,12 +193,23 @@ async def main():
         if not recipes: await message.answer(f"{title}: пока пусто.",reply_markup=main_menu()); return
         await message.answer(title+":",reply_markup=list_keyboard(recipes))
 
-    async def show_settings(message):
+    async def show_settings(message, edit=False):
         s=db.settings(message.from_user.id)
         info=[]
         info.append("Аллергии: "+(", ".join(alphabetize(s["allergies"])) or "не указаны"))
         info.append("Не ем: "+(", ".join(alphabetize(s["excluded"])) or "ничего не исключено"))
-        await message.answer("Настройки\n"+"\n".join(info),reply_markup=settings_keyboard(s))
+        text="⚙️ Настройки\n"+"\n".join(info)
+        if edit: await message.edit_text(text,reply_markup=settings_keyboard(s))
+        else: await message.answer(text,reply_markup=settings_keyboard(s))
+
+    @dp.callback_query(F.data.startswith("firststart:"))
+    async def first_start_action(call):
+        action=call.data.split(":",1)[1]
+        if action=="settings":
+            await show_settings(call.message,edit=True)
+        else:
+            await show_home(call.message,call.from_user.id,call.from_user.first_name or "",edit=True)
+        await call.answer()
 
     async def show_restrictions(message,uid,category,page=0):
         category=normalize_restriction_category(category)

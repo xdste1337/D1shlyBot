@@ -7,6 +7,12 @@ def main_menu():
         [KeyboardButton(text="✨ Ещё")],
     ],resize_keyboard=True)
 
+def first_start_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚙️ Настроить предпочтения",callback_data="firststart:settings")],
+        [InlineKeyboardButton(text="🍳 Сразу к рецептам",callback_data="firststart:skip")],
+    ])
+
 def more_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],
