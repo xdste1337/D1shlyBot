@@ -54,8 +54,10 @@ RECIPES = [
 
 from .extended_recipes import EXTRA_RECIPES
 from .more_recipes import MORE_RECIPES
+from .pp_recipes import PP_RECIPES
 RECIPES.extend(EXTRA_RECIPES)
 RECIPES.extend(MORE_RECIPES)
+RECIPES.extend(PP_RECIPES)
 
 # Search facets used by the local filter engine. These are catalog labels, not nutrition claims.
 for recipe in RECIPES:
