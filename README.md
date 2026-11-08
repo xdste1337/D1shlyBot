@@ -48,7 +48,7 @@ Dishly ищет рецепты только в локальном каталог
 3. Если серверу нужен прокси для Telegram Bot API, укажите в `.env` локальный адрес прокси, например `TELEGRAM_PROXY=http://127.0.0.1:7890`. Без этого параметра бот подключается напрямую.
 4. Запустите `python -m dishly.bot`. Для постоянной работы настройте `systemd` для бота и используемого прокси-клиента.
 
-Не храните токен, VPN-подписку или конфигурацию прокси в Git. Файлы `.env`, `nevpn*` и `mihomo.log` исключены из репозитория.
+Не храните токен, VPN-подписку или конфигурацию прокси в Git. Файлы `.env`, `nevpn*`, журналы `*.log`, `cache.db`, базы `*.sqlite3`, правила Mihomo (`*.mrs`, `rule-sets/`) и копии `*.before-proxy` исключены из репозитория.
 
 ### Обновление и обслуживание сервера
 
@@ -67,6 +67,15 @@ sudo systemctl status dishly.service --no-pager
 ```bash
 sudo journalctl -u dishly.service -n 60 --no-pager
 sudo journalctl -u mihomo.service -n 40 --no-pager
+```
+
+SQLite-база ежедневно копируется примерно в 03:00 в `/home/keka/backups/dishly`. Хранятся последние 14 дней; пропущенный при выключении VM запуск таймер выполнит после загрузки. Проверить расписание и вручную запустить копию можно так:
+
+```bash
+sudo systemctl list-timers dishly-backup.timer --no-pager
+sudo systemctl start dishly-backup.service
+sudo systemctl status dishly-backup.service --no-pager
+ls -lh /home/keka/backups/dishly
 ```
 
 Если у `git pull` конфликт из-за локальных изменений, сначала проверьте `git status --short`. Не удаляйте `.env`, `dishly.sqlite3` или конфигурацию Mihomo: там находятся настройки и пользовательские данные.
