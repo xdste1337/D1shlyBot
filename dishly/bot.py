@@ -56,6 +56,15 @@ def suitable_for_equipment(recipe, equipment):
         return "плита" in equipment
     return method in equipment
 
+def scaled_ingredient_amount(amount, ratio, unit):
+    scaled=amount*ratio
+    if unit=="шт":
+        return max(1,int(scaled+0.5))
+    if unit in {"г","мл"}:
+        step=10 if scaled>=100 else 5 if scaled>=20 else 1
+        return max(1,int(scaled/step+0.5)*step)
+    return round(scaled,1)
+
 def normalize_restriction_category(category):
     return "excluded" if category=="exclude" else category
 
@@ -64,8 +73,7 @@ def recipe_text(recipe, servings=None, available_ingredients=None, user_exclusio
     lines=[f"🍽 <b>{recipe['title']}</b>",recipe["description"],f"⏱ {recipe['minutes']} мин. · {recipe['difficulty']} · {servings or recipe['servings']} порц. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.",f"Способ: {recipe['method']}"]
     lines += ["", "<b>Ингредиенты</b>"]
     for i in recipe["ingredients"]:
-        scaled_amount=i["amount"]*ratio
-        amount=max(1,int(scaled_amount+0.5)) if i["unit"]=="шт" else round(scaled_amount,1)
+        amount=scaled_ingredient_amount(i["amount"],ratio,i["unit"])
         lines.append(f"• {i['name']}: {amount:g} {i['unit']}" + (" (по желанию)" if i.get("optional") else ""))
     if available_ingredients is not None:
         missing=recipe_ingredients(recipe)-{canonical(name) for name in available_ingredients}
