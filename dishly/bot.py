@@ -15,7 +15,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, canonical
 
@@ -26,6 +26,7 @@ filter_states = {}
 filter_results = {}
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
+EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
@@ -43,6 +44,14 @@ def prioritize_selected(options, selected):
 
 def user_restrictions(settings):
     return sorted(set(settings["excluded"]) | set(settings["allergies"]))
+
+def suitable_for_equipment(recipe, equipment):
+    if not equipment or recipe["method"] == "без готовки":
+        return True
+    method = recipe["method"]
+    if method in {"плита", "кастрюля", "сковорода"}:
+        return "плита" in equipment
+    return method in equipment
 
 def normalize_restriction_category(category):
     return "excluded" if category=="exclude" else category
@@ -64,7 +73,8 @@ async def show_search(message, offset=0, user_id=None, edit=False):
     query,raw=queries.get(uid,(None,""))
     if not query: return
     settings=db.settings(uid)
-    all_results=rank_recipes(db.recipes(),query,user_restrictions(settings),offset=0,limit=100)
+    recipes=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+    all_results=rank_recipes(recipes,query,user_restrictions(settings),offset=0,limit=100)
     page=all_results[offset:offset+5]
     if not page:
         text="По этому запросу больше рецептов нет. Попробуй другие продукты или пожелания."
@@ -123,8 +133,8 @@ async def main():
         settings=db.settings(uid); recipe=get_shared_dish()
         lines=[f"👋 <b>Привет{name}!</b>",greeting,"",f"📚 В каталоге уже <b>{len(db.recipes())}</b> идей для готовки."]
         if recipe:
-            if blocked(recipe,user_restrictions(settings)):
-                lines.append("🍲 Блюдо дня выбрано для всех, а я учту твои ограничения и не буду предлагать неподходящие рецепты.")
+            if blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]):
+                lines.append("🍲 Блюдо дня выбрано для всех, а я учту твои ограничения и технику и предложу подходящие рецепты.")
             else:
                 lines.append(f"🍲 Блюдо дня: <b>{html.escape(recipe['title'])}</b> · ⏱ {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.")
         restrictions=user_restrictions(settings)
@@ -148,7 +158,7 @@ async def main():
             greeting = f"👋 Привет, {name}!" if name else "👋 Привет!"
             text = (f"{greeting}\n\n"
                     "Я помогу выбрать, что приготовить 🥘\n"
-                    "Перед началом можно указать порции, аллергии и продукты, которые лучше исключить.\n\n"
+                    "Перед началом можно указать порции, аллергии, продукты-исключения и доступную технику.\n\n"
                     "Это необязательно: настройки можно пропустить и изменить позже в разделе «Ещё» → «Настройки».")
             await message.answer(text,reply_markup=first_start_keyboard())
             return
@@ -198,6 +208,7 @@ async def main():
         info=[]
         info.append("Аллергии: "+(", ".join(alphabetize(s["allergies"])) or "не указаны"))
         info.append("Не ем: "+(", ".join(alphabetize(s["excluded"])) or "ничего не исключено"))
+        info.append("Техника: "+(", ".join(alphabetize(s["equipment"])) or "подбор не ограничен"))
         text="⚙️ Настройки\n"+"\n".join(info)
         if edit: await message.edit_text(text,reply_markup=settings_keyboard(s))
         else: await message.answer(text,reply_markup=settings_keyboard(s))
@@ -262,7 +273,8 @@ async def main():
 
     async def show_filtered_results(message,uid,offset=0,edit=True):
         state=get_filter_state(uid); settings=db.settings(uid)
-        recipes=filter_recipes(db.recipes(),state["ingredients"],state["methods"]|state["moods"],state["max_minutes"],user_restrictions(settings))
+        available=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+        recipes=filter_recipes(available,state["ingredients"],state["methods"]|state["moods"],state["max_minutes"],user_restrictions(settings))
         filter_results[uid]=[recipe["id"] for recipe in recipes]
         if not recipes:
             text="По всем выбранным условиям рецептов не нашлось. Попробуй убрать один из фильтров."
@@ -282,9 +294,9 @@ async def main():
         recipe=get_shared_dish()
         if not recipe: return
         rid=recipe["id"]; db.add_history(uid,rid)
-        if blocked(recipe,user_restrictions(settings)):
+        if blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]):
             text=(f"🍲 <b>Блюдо дня для всех</b>\n\n<b>{recipe['title']}</b> · {recipe['minutes']} мин.\n"
-                  "В рецепте есть продукт из твоих исключений. Чтобы подобрать другой подходящий вариант, воспользуйся поиском.")
+                  "Это блюдо не подходит под твои ограничения или доступную технику. Нажми «Другой вариант» — подберу личную альтернативу.")
         else:
             text="🍲 <b>Блюдо дня для всех</b>\n\n"+recipe_text(recipe,settings["servings"])
         markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid))
@@ -295,7 +307,7 @@ async def main():
         settings=db.settings(user_id)
         daily_id=db.shared_dish_today()
         seen=db.user_alternatives_today(user_id)
-        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and not blocked(r,user_restrictions(settings))]
+        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
         if not candidates:
             text="На сегодня больше подходящих вариантов нет. Общее блюдо дня осталось прежним."
             if edit: await message.edit_text(text,reply_markup=None)
@@ -478,12 +490,36 @@ async def main():
         action=call.data.split(":")[1]; s=db.settings(call.from_user.id)
         if action in ("servings",): await call.message.edit_text("Выбери число порций:",reply_markup=servings_keyboard())
         elif action in ("exclude","allergies"): await show_restrictions(call.message,call.from_user.id,action)
+        elif action=="equipment": await show_equipment(call.message,call.from_user.id)
         elif action=="clear":
             db.set_excluded(call.from_user.id,[]); db.set_allergies(call.from_user.id,[])
             await call.message.edit_text("Аллергии и исключённые продукты сброшены.",reply_markup=settings_keyboard(db.settings(call.from_user.id)))
         elif action=="back":
-            info="Настройки\nАллергии: "+(", ".join(alphabetize(s["allergies"])) or "не указаны")+"\nНе ем: "+(", ".join(alphabetize(s["excluded"])) or "ничего не исключено")
+            info=("⚙️ Настройки\nАллергии: "+(", ".join(alphabetize(s["allergies"])) or "не указаны")+
+                  "\nНе ем: "+(", ".join(alphabetize(s["excluded"])) or "ничего не исключено")+
+                  "\nТехника: "+(", ".join(alphabetize(s["equipment"])) or "подбор не ограничен"))
             await call.message.edit_text(info,reply_markup=settings_keyboard(s))
+        await call.answer()
+
+    async def show_equipment(message,uid):
+        selected=set(db.settings(uid)["equipment"])
+        text=("🍳 Выбери технику, которая у тебя есть. Рецепты с другими способами приготовления будут исключены из подбора.\n"
+              "Плита подходит для блюд в кастрюле и на сковороде; блюда без готовки останутся доступны.\n\n"
+              "Если ничего не отметить, подбор не будет ограничен техникой.\n"
+              "Доступно: "+(", ".join(alphabetize(selected)) or "не ограничиваю"))
+        await message.edit_text(text,reply_markup=equipment_keyboard(EQUIPMENT_OPTIONS,selected))
+
+    @dp.callback_query(F.data.startswith("equipment:"))
+    async def toggle_equipment(call):
+        index=int(call.data.split(":",1)[1])
+        if index<0 or index>=len(EQUIPMENT_OPTIONS):
+            await call.answer("Техника не найдена",show_alert=True); return
+        selected=set(db.settings(call.from_user.id)["equipment"])
+        item=EQUIPMENT_OPTIONS[index]
+        if item in selected: selected.remove(item)
+        else: selected.add(item)
+        db.set_equipment(call.from_user.id,alphabetize(selected))
+        await show_equipment(call.message,call.from_user.id)
         await call.answer()
 
     @dp.callback_query(F.data.startswith("servings:"))

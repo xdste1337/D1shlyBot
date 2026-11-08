@@ -144,9 +144,21 @@ def settings_keyboard(settings):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"Порций: {settings['servings']} (изменить)",callback_data="settings:servings")],
         [InlineKeyboardButton(text=f"Аллергии · {len(settings['allergies'])}",callback_data="settings:allergies"),InlineKeyboardButton(text=f"Не ем · {len(settings['excluded'])}",callback_data="settings:exclude")],
+        [InlineKeyboardButton(text=f"🍳 Техника · {len(settings['equipment']) or 'не ограничивать'}",callback_data="settings:equipment")],
         [InlineKeyboardButton(text="Сбросить ограничения",callback_data="settings:clear")],
         [InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
+
+def equipment_keyboard(options, selected):
+    rows=[]; pending=[]
+    for index,label in enumerate(options):
+        prefix="✓ " if label in selected else ""
+        pending.append(InlineKeyboardButton(text=prefix+label,callback_data=f"equipment:{index}"))
+        if len(pending)==2:
+            rows.append(pending); pending=[]
+    if pending: rows.append(pending)
+    rows.append([InlineKeyboardButton(text="Готово",callback_data="settings:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def servings_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=str(i),callback_data=f"servings:{i}") for i in range(1,7)], [InlineKeyboardButton(text="Назад",callback_data="settings:back")]])

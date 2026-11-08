@@ -16,7 +16,7 @@ class Database:
     def init(self):
         self.conn.executescript("""
         CREATE TABLE IF NOT EXISTS recipes(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,minutes INTEGER NOT NULL,difficulty TEXT NOT NULL,servings INTEGER NOT NULL,tags TEXT NOT NULL,method TEXT NOT NULL,allergens TEXT NOT NULL,ingredients TEXT NOT NULL,steps TEXT NOT NULL,source TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, servings INTEGER NOT NULL DEFAULT 2, excluded TEXT NOT NULL DEFAULT '[]', allergies TEXT NOT NULL DEFAULT '[]');
+        CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, servings INTEGER NOT NULL DEFAULT 2, excluded TEXT NOT NULL DEFAULT '[]', allergies TEXT NOT NULL DEFAULT '[]', equipment TEXT NOT NULL DEFAULT '[]');
         CREATE TABLE IF NOT EXISTS favorites(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,recipe_id));
         CREATE TABLE IF NOT EXISTS history(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), viewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id,recipe_id));
         CREATE TABLE IF NOT EXISTS dish_of_day(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
@@ -26,6 +26,8 @@ class Database:
         user_columns={row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "allergies" not in user_columns:
             self.conn.execute("ALTER TABLE users ADD COLUMN allergies TEXT NOT NULL DEFAULT '[]'")
+        if "equipment" not in user_columns:
+            self.conn.execute("ALTER TABLE users ADD COLUMN equipment TEXT NOT NULL DEFAULT '[]'")
         self.conn.executemany("""
             INSERT INTO recipes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,
@@ -62,7 +64,7 @@ class Database:
     def settings(self, uid):
         self.ensure_user(uid)
         r = self.conn.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
-        return {"servings": r["servings"], "excluded": json.loads(r["excluded"]), "allergies": json.loads(r["allergies"])}
+        return {"servings": r["servings"], "excluded": json.loads(r["excluded"]), "allergies": json.loads(r["allergies"]), "equipment": json.loads(r["equipment"])}
 
     def set_servings(self, uid, n):
         self.ensure_user(uid); self.conn.execute("UPDATE users SET servings=? WHERE user_id=?", (n,uid)); self.conn.commit()
@@ -72,6 +74,9 @@ class Database:
 
     def set_allergies(self, uid, values):
         self.ensure_user(uid); self.conn.execute("UPDATE users SET allergies=? WHERE user_id=?", (json.dumps(values,ensure_ascii=False),uid)); self.conn.commit()
+
+    def set_equipment(self, uid, values):
+        self.ensure_user(uid); self.conn.execute("UPDATE users SET equipment=? WHERE user_id=?", (json.dumps(values,ensure_ascii=False),uid)); self.conn.commit()
 
     def favorites(self, uid):
         return [self.get_recipe(r[0]) for r in self.conn.execute("SELECT recipe_id FROM favorites WHERE user_id=? ORDER BY rowid DESC", (uid,))]
