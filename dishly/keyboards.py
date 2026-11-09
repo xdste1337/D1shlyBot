@@ -75,7 +75,7 @@ def main_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🍳 Подобрать блюдо"),KeyboardButton(text="🔎 Фильтры")],
         [KeyboardButton(text="📚 Каталог"),KeyboardButton(text="🍲 Блюдо дня")],
-        [KeyboardButton(text="✨ Ещё"),KeyboardButton(text="⭐ Подписка")],
+        [KeyboardButton(text="✨ Ещё")],
     ],resize_keyboard=True)
 
 def first_start_keyboard():
@@ -86,10 +86,8 @@ def first_start_keyboard():
 
 def more_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="👩‍🍳 ИИ-советчик")],
+        [KeyboardButton(text="⭐ Dishly Plus · ИИ-шеф и план")],
         [KeyboardButton(text="🧺 Из моих продуктов")],
-        [KeyboardButton(text="📅 План на 3 дня")],
-        [KeyboardButton(text="⭐ Dishly Plus")],
         [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],
         [KeyboardButton(text="⚙️ Настройки"),KeyboardButton(text="❔ Помощь")],
         [KeyboardButton(text="🏠 Главное меню")],
