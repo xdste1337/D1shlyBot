@@ -35,6 +35,12 @@ def plus_terms_keyboard():
         [InlineKeyboardButton(text="Назад",callback_data="plus:home")],
     ])
 
+def plus_invoice_keyboard(invoice_url, price):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"⭐ Оплатить {price} Stars",url=invoice_url)],
+        [InlineKeyboardButton(text="Назад к Dishly Plus",callback_data="plus:home")],
+    ])
+
 def advisor_terms_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Прочитал(а), продолжить",callback_data="advisor:terms_accept")],

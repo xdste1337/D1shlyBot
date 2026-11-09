@@ -19,7 +19,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery, LabeledPrice, Rep
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard, advisor_test_keyboard, admin_access_keyboard, admin_access_users_keyboard, advisor_terms_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard, advisor_test_keyboard, admin_access_keyboard, admin_access_users_keyboard, advisor_terms_keyboard, plus_invoice_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -243,7 +243,7 @@ async def main():
         if db.plus_active(uid):
             await show_plus(message,uid)
             return
-        await message.answer_invoice(
+        invoice_url=await bot.create_invoice_link(
             title="Dishly Plus — ИИ-шеф и план",
             description="ИИ-шеф, план питания на 3 дня и список покупок на 30 дней. Автопродление можно отключить в боте.",
             payload="dishly_plus_monthly_v1",
@@ -251,6 +251,12 @@ async def main():
             currency="XTR",
             prices=[LabeledPrice(label="Dishly Plus · 30 дней",amount=config.plus_monthly_stars)],
             subscription_period=2592000,
+        )
+        await message.answer(
+            f"⭐ <b>Dishly Plus · {config.plus_monthly_stars} Stars в месяц</b>\n\n"
+            "Нажми кнопку ниже, чтобы открыть оплату в Telegram. Подписка продлевается раз в 30 дней; автопродление можно отключить в боте.",
+            parse_mode="HTML",
+            reply_markup=plus_invoice_keyboard(invoice_url,config.plus_monthly_stars),
         )
 
     async def advisor_answer(message, uid, question):
