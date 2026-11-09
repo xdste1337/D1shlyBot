@@ -4,7 +4,7 @@ import os
 import random
 import re
 import html
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
@@ -15,7 +15,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -31,7 +31,7 @@ FILTER_METHODS = ["микроволновка","аэрогриль","кастр�
 EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
-MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
+MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","📅 План на 3 дня","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
 
 def russian_sort_key(value):
@@ -214,7 +214,7 @@ async def main():
 
     @dp.message(Command("help"))
     async def help_cmd(message):
-        await message.answer("💡 Напиши продукты или пожелания обычным текстом: «сытное из курицы без духовки». Ещё можно искать через фильтры, листать каталог и сохранять любимые рецепты ⭐",reply_markup=main_menu())
+        await message.answer("💡 Напиши продукты или пожелания обычным текстом: «сытное из курицы без духовки». Ещё можно искать через фильтры, листать каталог, сохранять любимые рецепты и собирать план на 3 дня ⭐",reply_markup=main_menu())
 
     @dp.message(F.text)
     async def text_handler(message: Message):
@@ -236,6 +236,8 @@ async def main():
             await dish_day(message); return
         if text=="✨ Ещё":
             await message.answer("🧰 Дополнительные разделы Dishly",reply_markup=more_menu()); return
+        if text=="📅 План на 3 дня":
+            await show_meal_plan(message,uid); return
         if text=="🏠 Главное меню":
             await show_home(message,message.from_user.id,message.from_user.first_name or ""); return
         if text in {"⭐ Избранное","Избранное"}:
@@ -276,6 +278,48 @@ async def main():
     async def show_list(message,title,recipes):
         if not recipes: await message.answer(f"{title}: пока пусто.",reply_markup=main_menu()); return
         await message.answer(title+":",reply_markup=list_keyboard(recipes))
+
+    async def show_meal_plan(message,uid,edit=False,regenerate=False):
+        settings=db.settings(uid)
+        allowed=[r for r in db.recipes() if not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
+        allowed_ids={r["id"] for r in allowed}
+        previous_ids=db.meal_plan(uid)
+        plan_ids=[] if regenerate else previous_ids
+        plan=[db.get_recipe(rid) for rid in plan_ids]
+        if len(plan)!=3 or any(not r or r["id"] not in allowed_ids for r in plan):
+            if len(allowed)<3:
+                text="Пока не получается собрать план на три дня с текущими ограничениями и техникой. Попробуй изменить настройки."
+                if edit: await message.edit_text(text,reply_markup=meal_plan_unavailable_keyboard())
+                else: await message.answer(text,reply_markup=main_menu())
+                return
+            recent={r["id"] for r in db.history(uid)}
+            favorites={r["id"] for r in db.favorites(uid)}
+            pool=[r for r in allowed if r["id"] not in recent and (not regenerate or r["id"] not in previous_ids)]
+            if len(pool)<3 and regenerate:
+                pool=[r for r in allowed if r["id"] not in previous_ids]
+            if len(pool)<3: pool=allowed[:]
+            random.shuffle(pool)
+            plan=[]
+            used_types=set()
+            for _ in range(3):
+                def plan_score(recipe):
+                    kinds=set(recipe["tags"]) & {"мясное","рыбное","морепродукты","вегетарианское"}
+                    return (bool(kinds & used_types),recipe["id"] not in favorites,random.random())
+                chosen=min(pool,key=plan_score)
+                plan.append(chosen)
+                used_types.update(set(chosen["tags"]) & {"мясное","рыбное","морепродукты","вегетарианское"})
+                pool.remove(chosen)
+            db.set_meal_plan(uid,[r["id"] for r in plan])
+        labels=("Сегодня","Завтра","Послезавтра")
+        lines=["📅 <b>План на ближайшие 3 дня</b>","По одной идее на день. Учитываю твои аллергии, исключения и доступную технику.",""]
+        for index,recipe in enumerate(plan):
+            plan_date=date.today()+timedelta(days=index)
+            lines.append(f"<b>{labels[index]} · {plan_date:%d.%m}</b>")
+            lines.append(f"🍽 {html.escape(recipe['title'])} · {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.")
+        markup=meal_plan_keyboard(plan)
+        text="\n".join(lines)
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+        else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
     async def show_settings(message, edit=False):
         s=db.settings(message.from_user.id)
@@ -571,6 +615,40 @@ async def main():
     async def hint(call):
         prompt="Напиши продукты через запятую, например: яйца, помидоры." if call.data.endswith("ingredients") else "Напиши пожелание, например: быстрое, сытное или без духовки."
         await call.message.answer(prompt); await call.answer()
+
+    @dp.callback_query(F.data.startswith("mealplan:open:"))
+    async def open_meal_plan_recipe(call):
+        index=int(call.data.rsplit(":",1)[1]); plan=db.meal_plan(call.from_user.id)
+        if index not in range(len(plan)):
+            await call.answer("План устарел. Открой его заново.",show_alert=True); return
+        recipe=db.get_recipe(plan[index])
+        if not recipe:
+            await call.answer("Рецепт не найден",show_alert=True); return
+        db.add_history(call.from_user.id,recipe["id"])
+        settings=db.settings(call.from_user.id)
+        saved=any(r["id"]==recipe["id"] for r in db.favorites(call.from_user.id))
+        markup=meal_plan_recipe_keyboard(index,recipe["id"],saved)
+        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=markup)
+        await call.answer()
+
+    @dp.callback_query(F.data=="mealplan:back")
+    async def meal_plan_back(call):
+        await show_meal_plan(call.message,call.from_user.id,edit=True)
+        await call.answer()
+
+    @dp.callback_query(F.data=="mealplan:refresh")
+    async def refresh_meal_plan(call):
+        await show_meal_plan(call.message,call.from_user.id,edit=True,regenerate=True)
+        await call.answer("План обновлён")
+
+    @dp.callback_query(F.data.startswith("mealplan:fav:"))
+    async def meal_plan_favorite(call):
+        index=int(call.data.rsplit(":",1)[1]); plan=db.meal_plan(call.from_user.id)
+        if index not in range(len(plan)):
+            await call.answer("План устарел. Открой его заново.",show_alert=True); return
+        rid=plan[index]; saved=db.toggle_favorite(call.from_user.id,rid)
+        await call.message.edit_reply_markup(reply_markup=meal_plan_recipe_keyboard(index,rid,saved))
+        await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("settings:"))
     async def settings_action(call):

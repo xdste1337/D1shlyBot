@@ -16,6 +16,7 @@ def first_start_keyboard():
 def more_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🧺 Из моих продуктов")],
+        [KeyboardButton(text="📅 План на 3 дня")],
         [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],
         [KeyboardButton(text="⚙️ Настройки"),KeyboardButton(text="❔ Помощь")],
         [KeyboardButton(text="🏠 Главное меню")],
@@ -138,6 +139,24 @@ def dish_alternative_keyboard(rid, saved=False):
 
 def list_keyboard(recipes, prefix="recipe"):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=r["title"],callback_data=f"{prefix}:{r['id']}")] for r in recipes] + [[InlineKeyboardButton(text="В меню",callback_data="menu")]])
+
+def meal_plan_keyboard(recipes):
+    rows=[[InlineKeyboardButton(text=f"📖 Открыть блюдо {index+1}",callback_data=f"mealplan:open:{index}")] for index,_ in enumerate(recipes)]
+    rows.extend([
+        [InlineKeyboardButton(text="🔄 Новый план",callback_data="mealplan:refresh")],
+        [InlineKeyboardButton(text="В меню",callback_data="menu")],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def meal_plan_recipe_keyboard(index, rid, saved=False):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"mealplan:fav:{index}")],
+        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
+        [InlineKeyboardButton(text="← К плану",callback_data="mealplan:back")],
+    ])
+
+def meal_plan_unavailable_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="В меню",callback_data="menu")]])
 
 def unknown_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="По ингредиентам",callback_data="hint:ingredients"),InlineKeyboardButton(text="По настроению",callback_data="hint:mood")]])

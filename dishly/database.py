@@ -22,6 +22,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS dish_of_day(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
         CREATE TABLE IF NOT EXISTS shared_dish_of_day(day TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES recipes(id));
         CREATE TABLE IF NOT EXISTS user_dish_alternatives(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
+        CREATE TABLE IF NOT EXISTS meal_plans(user_id INTEGER PRIMARY KEY, recipe_ids TEXT NOT NULL, plan_date TEXT NOT NULL);
         """)
         user_columns={row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "allergies" not in user_columns:
@@ -99,6 +100,15 @@ class Database:
 
     def history(self, uid):
         return [self.get_recipe(r[0]) for r in self.conn.execute("SELECT recipe_id FROM history WHERE user_id=? ORDER BY viewed_at DESC,rowid DESC LIMIT 10",(uid,))]
+
+    def meal_plan(self, uid):
+        row=self.conn.execute("SELECT recipe_ids,plan_date FROM meal_plans WHERE user_id=?",(uid,)).fetchone()
+        if not row or row[1]!=date.today().isoformat(): return []
+        return json.loads(row[0])
+
+    def set_meal_plan(self, uid, recipe_ids):
+        with self.conn:
+            self.conn.execute("INSERT INTO meal_plans(user_id,recipe_ids,plan_date) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET recipe_ids=excluded.recipe_ids,plan_date=excluded.plan_date",(uid,json.dumps(recipe_ids),date.today().isoformat()))
 
     def shown_today(self, uid):
         return {r[0] for r in self.conn.execute("SELECT recipe_id FROM dish_of_day WHERE user_id=? AND day=?",(uid,date.today().isoformat()))}
