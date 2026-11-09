@@ -985,23 +985,36 @@ async def main():
         action=call.data.split(":",1)[1]
         uid=call.from_user.id
         if action=="home":
+            await call.answer()
             await show_plus(call.message,uid,edit=True)
         elif action=="terms":
+            await call.answer()
             await show_plus_terms(call.message,uid)
         elif action=="accept":
             if db.plus_active(uid) or db.plus_key_access(uid) or (config.ai_api_key and uid==config.admin_telegram_id):
                 db.accept_plus_terms(uid)
-                await show_plus(call.message,uid,edit=True)
                 await call.answer("Условия приняты")
+                await show_plus(call.message,uid,edit=True)
                 return
             if not plus_ready():
                 await call.answer("Dishly Plus ещё не настроен",show_alert=True)
                 return
             db.accept_plus_terms(uid)
-            await send_plus_invoice(call.message,uid)
+            await call.answer("Готовлю счёт на оплату")
+            try:
+                await send_plus_invoice(call.message,uid)
+            except TelegramAPIError:
+                logging.exception("Could not send Dishly Plus invoice to user %s",uid)
+                await call.message.answer("Не получилось открыть оплату. Попробуй ещё раз через минуту или напиши /paysupport.")
         elif action=="subscribe":
-            await send_plus_invoice(call.message,uid)
+            await call.answer("Открываю оплату")
+            try:
+                await send_plus_invoice(call.message,uid)
+            except TelegramAPIError:
+                logging.exception("Could not send Dishly Plus invoice to user %s",uid)
+                await call.message.answer("Не получилось открыть оплату. Попробуй ещё раз через минуту или напиши /paysupport.")
         elif action=="refresh":
+            await call.answer()
             await show_plus(call.message,uid,edit=True)
         elif action=="cancel":
             row=db.plus_subscription(uid)
