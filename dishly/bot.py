@@ -15,7 +15,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -320,6 +320,34 @@ async def main():
         text="\n".join(lines)
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
+
+    async def show_shopping_list(message,uid,edit=False):
+        plan_ids=db.meal_plan(uid)
+        recipes=[db.get_recipe(rid) for rid in plan_ids]
+        if len(recipes)!=3 or any(not recipe for recipe in recipes):
+            await show_meal_plan(message,uid,edit=edit)
+            return
+        settings=db.settings(uid)
+        totals={}
+        for recipe in recipes:
+            ratio=settings["servings"]/recipe["servings"]
+            for ingredient in recipe["ingredients"]:
+                if ingredient.get("optional"):
+                    continue
+                name=ingredient["name"].strip()
+                unit={"листа":"лист"}.get(ingredient["unit"],ingredient["unit"])
+                key=(name.casefold(),unit)
+                if key not in totals:
+                    totals[key]=[name,0.0]
+                totals[key][1]+=ingredient["amount"]*ratio
+        lines=["🛒 <b>Список покупок на 3 дня</b>",f"Порций на каждое блюдо: {settings['servings']}.",""]
+        for (_,unit),(name,amount) in sorted(totals.items(),key=lambda item:russian_sort_key(item[1][0])):
+            rounded=scaled_ingredient_amount(amount,1,unit)
+            lines.append(f"• {html.escape(name)} — {rounded:g} {unit}")
+        lines.extend(["","Необязательные ингредиенты в список не включены."])
+        text="\n".join(lines)
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=shopping_list_keyboard())
+        else: await message.answer(text,parse_mode="HTML",reply_markup=shopping_list_keyboard())
 
     async def show_settings(message, edit=False):
         s=db.settings(message.from_user.id)
@@ -640,6 +668,11 @@ async def main():
     async def refresh_meal_plan(call):
         await show_meal_plan(call.message,call.from_user.id,edit=True,regenerate=True)
         await call.answer("План обновлён")
+
+    @dp.callback_query(F.data=="mealplan:shopping")
+    async def meal_plan_shopping(call):
+        await show_shopping_list(call.message,call.from_user.id,edit=True)
+        await call.answer()
 
     @dp.callback_query(F.data.startswith("mealplan:fav:"))
     async def meal_plan_favorite(call):

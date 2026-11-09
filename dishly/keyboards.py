@@ -143,10 +143,14 @@ def list_keyboard(recipes, prefix="recipe"):
 def meal_plan_keyboard(recipes):
     rows=[[InlineKeyboardButton(text=f"📖 Открыть блюдо {index+1}",callback_data=f"mealplan:open:{index}")] for index,_ in enumerate(recipes)]
     rows.extend([
+        [InlineKeyboardButton(text="🛒 Список покупок",callback_data="mealplan:shopping")],
         [InlineKeyboardButton(text="🔄 Новый план",callback_data="mealplan:refresh")],
         [InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def shopping_list_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="← К плану",callback_data="mealplan:back")]])
 
 def meal_plan_recipe_keyboard(index, rid, saved=False):
     return InlineKeyboardMarkup(inline_keyboard=[
