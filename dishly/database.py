@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 
 from .data.recipes import RECIPES
 from .data.nutrition import estimate_kcal_per_serving
@@ -25,12 +25,19 @@ class Database:
         CREATE TABLE IF NOT EXISTS meal_plans(user_id INTEGER PRIMARY KEY, recipe_ids TEXT NOT NULL, plan_date TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS recipe_feedback(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), cooked_at TEXT, liked INTEGER NOT NULL DEFAULT 0, not_suggest INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id,recipe_id));
         CREATE TABLE IF NOT EXISTS recipe_reports(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), message TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, delivered INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS plus_accounts(user_id INTEGER PRIMARY KEY, terms_accepted INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS plus_subscriptions(user_id INTEGER PRIMARY KEY, expires_at INTEGER NOT NULL, charge_id TEXT NOT NULL, canceled INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS plus_payments(charge_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, currency TEXT NOT NULL, paid_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, refunded INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS advisor_usage(user_id INTEGER NOT NULL, day TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,day));
         """)
         user_columns={row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "allergies" not in user_columns:
             self.conn.execute("ALTER TABLE users ADD COLUMN allergies TEXT NOT NULL DEFAULT '[]'")
         if "equipment" not in user_columns:
             self.conn.execute("ALTER TABLE users ADD COLUMN equipment TEXT NOT NULL DEFAULT '[]'")
+        payment_columns={row[1] for row in self.conn.execute("PRAGMA table_info(plus_payments)")}
+        if "refunded" not in payment_columns:
+            self.conn.execute("ALTER TABLE plus_payments ADD COLUMN refunded INTEGER NOT NULL DEFAULT 0")
         self.conn.executemany("""
             INSERT INTO recipes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,
@@ -151,6 +158,63 @@ class Database:
     def mark_recipe_report_delivered(self, report_id):
         with self.conn:
             self.conn.execute("UPDATE recipe_reports SET delivered=1 WHERE id=?",(report_id,))
+
+    def plus_terms_accepted(self, uid):
+        row=self.conn.execute("SELECT terms_accepted FROM plus_accounts WHERE user_id=?",(uid,)).fetchone()
+        return bool(row and row[0])
+
+    def accept_plus_terms(self, uid):
+        with self.conn:
+            self.conn.execute("INSERT INTO plus_accounts(user_id,terms_accepted) VALUES(?,1) ON CONFLICT(user_id) DO UPDATE SET terms_accepted=1",(uid,))
+
+    def plus_subscription(self, uid):
+        return self.conn.execute("SELECT expires_at,charge_id,canceled FROM plus_subscriptions WHERE user_id=?",(uid,)).fetchone()
+
+    def plus_active(self, uid, now=None):
+        row=self.plus_subscription(uid)
+        return bool(row and row[0]>(now or int(datetime.now(timezone.utc).timestamp())))
+
+    def record_plus_payment(self, uid, amount, currency, charge_id, expires_at, now=None):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        with self.conn:
+            inserted=self.conn.execute("INSERT OR IGNORE INTO plus_payments(charge_id,user_id,amount,currency) VALUES(?,?,?,?)",(charge_id,uid,amount,currency)).rowcount
+            if not inserted:
+                return False
+            existing=self.plus_subscription(uid)
+            if existing and existing[0]>now:
+                self.conn.execute("UPDATE plus_subscriptions SET expires_at=?,canceled=0 WHERE user_id=?",(expires_at,uid))
+            else:
+                self.conn.execute("INSERT INTO plus_subscriptions(user_id,expires_at,charge_id,canceled) VALUES(?,?,?,0) ON CONFLICT(user_id) DO UPDATE SET expires_at=excluded.expires_at,charge_id=excluded.charge_id,canceled=0",(uid,expires_at,charge_id))
+        return True
+
+    def cancel_plus_renewal(self, uid):
+        with self.conn:
+            self.conn.execute("UPDATE plus_subscriptions SET canceled=1 WHERE user_id=?",(uid,))
+
+    def plus_payments(self, uid, limit=10):
+        return self.conn.execute("SELECT charge_id,amount,currency,paid_at,refunded FROM plus_payments WHERE user_id=? ORDER BY paid_at DESC LIMIT ?",(uid,limit)).fetchall()
+
+    def plus_payment(self, uid, charge_id):
+        return self.conn.execute("SELECT refunded FROM plus_payments WHERE user_id=? AND charge_id=?",(uid,charge_id)).fetchone()
+
+    def mark_plus_payment_refunded(self, uid, charge_id):
+        with self.conn:
+            self.conn.execute("UPDATE plus_payments SET refunded=1 WHERE user_id=? AND charge_id=?",(uid,charge_id))
+
+    def revoke_plus_subscription(self, uid, now=None):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        with self.conn:
+            self.conn.execute("UPDATE plus_subscriptions SET expires_at=?,canceled=1 WHERE user_id=?",(now,uid))
+
+    def consume_advisor_request(self, uid, daily_limit):
+        today=date.today().isoformat()
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO advisor_usage(user_id,day,requests) VALUES(?,?,0)",(uid,today))
+            row=self.conn.execute("SELECT requests FROM advisor_usage WHERE user_id=? AND day=?",(uid,today)).fetchone()
+            if row[0]>=daily_limit:
+                return False
+            self.conn.execute("UPDATE advisor_usage SET requests=requests+1 WHERE user_id=? AND day=?",(uid,today))
+        return True
 
     def shown_today(self, uid):
         return {r[0] for r in self.conn.execute("SELECT recipe_id FROM dish_of_day WHERE user_id=? AND day=?",(uid,date.today().isoformat()))}

@@ -15,6 +15,34 @@ def cooked_button(rid, feedback=None):
 def report_cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена",callback_data="report:cancel")]])
 
+def plus_keyboard(active=False, accepted=False, payments_ready=False, canceled=False):
+    rows=[]
+    if active:
+        if not canceled:
+            rows.append([InlineKeyboardButton(text="Отключить автопродление",callback_data="plus:cancel")])
+        rows.append([InlineKeyboardButton(text="👩‍🍳 Спросить советчика",callback_data="advisor:start")])
+    elif payments_ready:
+        rows.append([InlineKeyboardButton(text="⭐ Открыть Dishly Plus",callback_data="plus:terms" if not accepted else "plus:subscribe")])
+    else:
+        rows.append([InlineKeyboardButton(text="Проверить настройку Plus",callback_data="plus:refresh")])
+    rows.append([InlineKeyboardButton(text="В меню",callback_data="menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def plus_terms_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Принимаю условия и продолжить",callback_data="plus:accept")],
+        [InlineKeyboardButton(text="Назад",callback_data="plus:home")],
+    ])
+
+def advisor_cancel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Завершить консультацию",callback_data="advisor:stop")]])
+
+def advisor_recipes_keyboard(recipes):
+    rows=[[InlineKeyboardButton(text=f"📖 {recipe['title']}",callback_data=f"recipe:{recipe['id']}")] for recipe in recipes]
+    rows.append([InlineKeyboardButton(text="Задать ещё вопрос",callback_data="advisor:start")])
+    rows.append([InlineKeyboardButton(text="Завершить",callback_data="advisor:stop")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def main_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🍳 Подобрать блюдо"),KeyboardButton(text="🔎 Фильтры")],
@@ -30,6 +58,7 @@ def first_start_keyboard():
 
 def more_menu():
     return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="👩‍🍳 ИИ-советчик")],
         [KeyboardButton(text="🧺 Из моих продуктов")],
         [KeyboardButton(text="📅 План на 3 дня")],
         [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],

@@ -1,21 +1,24 @@
 import asyncio
 import logging
+import asyncio
 import os
 import random
 import re
 import html
-from datetime import date, timedelta
+import json
+import aiohttp
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, Message, CallbackQuery
+from aiogram.types import FSInputFile, Message, CallbackQuery, LabeledPrice
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -27,12 +30,14 @@ filter_results = {}
 pantry_mode = set()
 pantry_results = set()
 report_mode = {}
+advisor_sessions = {}
+payment_support_mode = set()
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
-MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","📅 План на 3 дня","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
+MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","👩‍🍳 ИИ-советчик","📅 План на 3 дня","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
 
 def russian_sort_key(value):
@@ -166,6 +171,122 @@ async def main():
             recipe=random.choice(candidates); db.set_shared_dish_today(recipe["id"]); rid=recipe["id"]
         return db.get_recipe(rid)
 
+    def plus_ready():
+        return bool(config.deepseek_api_key and config.plus_monthly_stars and config.admin_telegram_id)
+
+    async def show_plus(message, uid, edit=False):
+        row=db.plus_subscription(uid); active=db.plus_active(uid)
+        expires=datetime.fromtimestamp(row[0],timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M") if row else None
+        if active:
+            auto="Автопродление отключено." if row[2] else "Подписка продлевается автоматически раз в месяц."
+            text=(f"👩‍🍳 <b>Dishly Plus активен</b> до {expires}.\n{auto}\n\n"
+                  f"Доступно до {config.advisor_daily_limit} обращений к советчику в день.")
+        else:
+            text=("✨ <b>Dishly Plus</b>\n\n"
+                  "Личный ИИ-советчик поможет выбрать блюдо и подобрать подходящие рецепты из каталога, учитывая твои настройки.\n\n"
+                  "Бесплатный каталог, фильтры и план на 3 дня останутся доступны всем.")
+            if config.plus_monthly_stars:
+                text+=f"\n\nЦена: {config.plus_monthly_stars} ⭐ в месяц."
+            if not config.deepseek_api_key:
+                text+="\n\nПока не настроен ключ DeepSeek API."
+            if not config.plus_monthly_stars:
+                text+="\nПока не задана цена подписки в Stars."
+            if not config.admin_telegram_id:
+                text+="\nНе настроен контакт поддержки платежей."
+        markup=plus_keyboard(active,db.plus_terms_accepted(uid),plus_ready(),bool(row and row[2]))
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
+        else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
+
+    async def show_plus_terms(message, uid):
+        price_text=f"{config.plus_monthly_stars} Telegram Stars" if config.plus_monthly_stars else "цена будет показана перед оплатой после настройки"
+        text=("📄 <b>Условия Dishly Plus</b>\n\n"
+              f"• Цена: {price_text} в месяц. Подписка продлевается автоматически раз в 30 дней.\n"
+              "• Отключить автопродление можно в разделе Dishly Plus; доступ сохранится до конца оплаченного периода.\n"
+              "• Советчик отправляет текст запроса, число порций, ограничения питания, доступную технику и подходящие рецепты в DeepSeek API. Telegram ID и имя туда не передаются.\n"
+              "• Ответы ИИ могут содержать ошибки и не заменяют рекомендации врача. При аллергиях Dishly исключает рецепты локально, но всегда проверяй состав и упаковку продуктов.\n"
+              "• По вопросам оплаты используй команду /paysupport. Вопросы по возврату рассматриваются индивидуально согласно правилам Telegram.\n\n"
+              "Нажимая кнопку ниже, ты подтверждаешь, что прочитал условия и согласен на обработку текста запроса через DeepSeek API.")
+        await message.answer(text,parse_mode="HTML",reply_markup=plus_terms_keyboard())
+
+    async def send_plus_invoice(message, uid):
+        if not plus_ready():
+            await show_plus(message,uid)
+            return
+        if not db.plus_terms_accepted(uid):
+            await show_plus_terms(message,uid)
+            return
+        if db.plus_active(uid):
+            await show_plus(message,uid)
+            return
+        await message.answer_invoice(
+            title="Dishly Plus — ИИ-советчик",
+            description="Доступ к личному кулинарному советчику на 30 дней. Автопродление можно отключить в боте.",
+            payload="dishly_plus_monthly_v1",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Dishly Plus · 30 дней",amount=config.plus_monthly_stars)],
+            subscription_period=2592000,
+        )
+
+    async def advisor_answer(message, uid, question):
+        if not db.plus_active(uid):
+            advisor_sessions.pop(uid,None)
+            await message.answer("Подписка Dishly Plus не активна или истекла.",reply_markup=main_menu())
+            return
+        if len(question)>1200:
+            await message.answer("Вопрос слишком длинный. Сократи его до 1200 символов.",reply_markup=advisor_cancel_keyboard())
+            return
+        if not db.consume_advisor_request(uid,config.advisor_daily_limit):
+            await message.answer("На сегодня лимит вопросов закончился. Попробуй завтра 🕒",reply_markup=advisor_cancel_keyboard())
+            return
+        settings=db.settings(uid); query=parse_query(question)
+        exclusions=set(user_restrictions(settings))|set(query.excluded)
+        hidden=db.not_suggested_recipe_ids(uid)
+        available=[r for r in db.recipes() if r["id"] not in hidden and not blocked(r,exclusions) and suitable_for_equipment(r,settings["equipment"])]
+        if query.understood:
+            ranked=rank_recipes(available,query,exclusions,limit=8,liked_recipe_ids=db.liked_recipe_ids(uid),recently_cooked_recipe_ids=db.recently_cooked_recipe_ids(uid))
+            candidates=[row[1] for row in ranked]
+        else:
+            candidates=random.sample(available,min(8,len(available))) if available else []
+        compact=[{"id":r["id"],"title":r["title"],"minutes":r["minutes"],"kcal":r["kcal_per_serving"],"ingredients":[i["name"] for i in r["ingredients"] if not i.get("optional",False)]} for r in candidates]
+        system=("Ты — кулинарный советчик Dishly. Отвечай по-русски, коротко, тепло и практично. "
+                "Подбирай только из переданного списка recipes. Не выдумывай блюда, ингредиенты, калории или факты о безопасности. "
+                "Если подходящего блюда нет, задай уточняющий вопрос или объясни это. Не предлагай ничего из excluded; список candidates уже отфильтрован, не пытайся его расширить. "
+                "Не давай медицинских советов и не обещай безопасность для аллергиков; напоминай проверять этикетки при вопросах об аллергии. "
+                "Верни только JSON вида {\"answer\":\"текст\",\"recipe_ids\":[\"id\"]}; recipe_ids должны быть только из переданного списка, не более трёх.")
+        user_payload={"question":question,"servings":settings["servings"],"excluded":sorted(exclusions),"equipment":settings["equipment"],"recipes":compact}
+        history=advisor_sessions.setdefault(uid,[])
+        messages=[{"role":"system","content":system},*history,{"role":"user","content":json.dumps(user_payload,ensure_ascii=False)}]
+        try:
+            timeout=aiohttp.ClientTimeout(total=45)
+            async with aiohttp.ClientSession(timeout=timeout) as client:
+                async with client.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization":f"Bearer {config.deepseek_api_key}","Content-Type":"application/json"},
+                    json={"model":config.deepseek_model,"messages":messages,"response_format":{"type":"json_object"},"max_tokens":500,"temperature":0.4,"thinking":{"type":"disabled"}},
+                    proxy=os.getenv("DEEPSEEK_PROXY") or None,
+                ) as response:
+                    if response.status!=200:
+                        logging.error("DeepSeek API returned HTTP %s",response.status)
+                        await message.answer("Советчик сейчас не ответил. Попробуй чуть позже.",reply_markup=advisor_cancel_keyboard())
+                        return
+                    result=await response.json()
+            content=result["choices"][0]["message"]["content"]
+            parsed=json.loads(content)
+            answer=str(parsed.get("answer","")).strip()[:3500] or "Не получилось сформулировать совет — попробуй уточнить запрос."
+            allowed={r["id"]:r for r in candidates}
+            selected=[]
+            for rid in parsed.get("recipe_ids",[]):
+                if rid in allowed and rid not in {r["id"] for r in selected}:
+                    selected.append(allowed[rid])
+                if len(selected)==3: break
+            history.extend([{"role":"user","content":json.dumps(user_payload,ensure_ascii=False)},{"role":"assistant","content":content}])
+            advisor_sessions[uid]=history[-8:]
+            await message.answer(answer,reply_markup=advisor_recipes_keyboard(selected) if selected else advisor_cancel_keyboard())
+        except (aiohttp.ClientError,asyncio.TimeoutError,KeyError,IndexError,TypeError,ValueError) as exc:
+            logging.warning("DeepSeek advisor request failed: %s",type(exc).__name__)
+            await message.answer("Не смог связаться с советчиком. Попробуй позже.",reply_markup=advisor_cancel_keyboard())
+
     async def show_home(message,uid,first_name="",edit=False):
         greetings=[
             "Сегодня на кухне пахнет чем-то вкусным 😋",
@@ -220,6 +341,64 @@ async def main():
     async def help_cmd(message):
         await message.answer("💡 Напиши продукты или пожелания обычным текстом: «сытное из курицы без духовки». Ещё можно искать через фильтры, листать каталог, сохранять любимые рецепты и собирать план на 3 дня ⭐",reply_markup=main_menu())
 
+    @dp.message(Command("plus"))
+    async def plus_cmd(message):
+        await show_plus(message,message.from_user.id)
+
+    @dp.message(Command("terms"))
+    async def terms_cmd(message):
+        await show_plus_terms(message,message.from_user.id)
+
+    @dp.message(Command("paysupport"))
+    async def paysupport_cmd(message):
+        payment_support_mode.add(message.from_user.id)
+        await message.answer("Напиши, с какой проблемой по оплате или подписке столкнулся. Перешлю сообщение администратору. Напиши /cancel, чтобы отменить.")
+
+    @dp.message(Command("pluspayments"))
+    async def plus_payments_cmd(message):
+        if not config.admin_telegram_id or message.from_user.id!=config.admin_telegram_id:
+            await message.answer("Команда доступна только администратору бота."); return
+        parts=message.text.split()
+        if len(parts)!=2 or not parts[1].isdigit():
+            await message.answer("Формат: /pluspayments USER_ID"); return
+        payments=db.plus_payments(int(parts[1]))
+        if not payments:
+            await message.answer("Платежей Dishly Plus для этого пользователя нет."); return
+        for payment in payments:
+            status="возвращён" if payment[4] else "не возвращён"
+            await message.answer(f"Платёж {payment[3]} · {payment[1]} ⭐ · {status}\nCharge ID: <code>{html.escape(payment[0])}</code>",parse_mode="HTML")
+
+    @dp.message(Command("refund"))
+    async def plus_refund_cmd(message):
+        if not config.admin_telegram_id or message.from_user.id!=config.admin_telegram_id:
+            await message.answer("Команда доступна только администратору бота."); return
+        parts=message.text.split(maxsplit=2)
+        if len(parts)!=3 or not parts[1].isdigit():
+            await message.answer("Формат: /refund USER_ID CHARGE_ID. Сначала найди платёж через /pluspayments USER_ID."); return
+        uid=int(parts[1]); charge_id=parts[2].strip()
+        payment=db.plus_payment(uid,charge_id)
+        if not payment:
+            await message.answer("Не нашёл этот платёж для указанного пользователя."); return
+        if payment[0]:
+            await message.answer("Этот платёж уже отмечен как возвращённый."); return
+        subscription=db.plus_subscription(uid)
+        if subscription and db.plus_active(uid) and not subscription[2]:
+            try:
+                await bot.edit_user_star_subscription(user_id=uid,telegram_payment_charge_id=subscription[1],is_canceled=True)
+                db.cancel_plus_renewal(uid)
+            except TelegramAPIError:
+                logging.exception("Could not cancel subscription before refund for user %s",uid)
+                await message.answer("Не удалось отключить автопродление; возврат не отправлял."); return
+        try:
+            await bot.refund_star_payment(user_id=uid,telegram_payment_charge_id=charge_id)
+            db.mark_plus_payment_refunded(uid,charge_id)
+            if subscription and db.plus_active(uid):
+                db.revoke_plus_subscription(uid)
+            await message.answer("Возврат отправлен через Telegram Stars.")
+        except TelegramAPIError:
+            logging.exception("Could not refund Dishly Plus payment for user %s",uid)
+            await message.answer("Telegram не выполнил возврат. Проверь charge ID и попробуй позже.")
+
     @dp.message(Command("id"))
     async def id_cmd(message):
         await message.answer(f"Твой Telegram user ID: <code>{message.from_user.id}</code>\nУкажи его в .env в строке ADMIN_TELEGRAM_ID, чтобы получать сообщения о проблемах с рецептами.",parse_mode="HTML")
@@ -268,6 +447,34 @@ async def main():
                 except TelegramAPIError:
                     logging.warning("Could not deliver recipe report %s to configured admin",report_id)
             await message.answer("Спасибо! Сохранил сообщение о проблеме с рецептом 📝",reply_markup=main_menu())
+            return
+        if uid in payment_support_mode:
+            if text.casefold() in {"отмена","/cancel"}:
+                payment_support_mode.discard(uid)
+                await message.answer("Обращение отменено.",reply_markup=main_menu())
+                return
+            if not config.admin_telegram_id:
+                payment_support_mode.discard(uid)
+                await message.answer("Поддержка оплаты пока не настроена. Попробуй позже.",reply_markup=main_menu())
+                return
+            body=(f"💳 <b>Вопрос по оплате Dishly Plus</b>\nПользователь: <code>{uid}</code>\n\n{html.escape(text[:3000])}")
+            try:
+                await bot.send_message(config.admin_telegram_id,body,parse_mode="HTML")
+                payment_support_mode.discard(uid)
+                await message.answer("Обращение отправлено администратору. Спасибо!",reply_markup=main_menu())
+            except TelegramAPIError:
+                logging.warning("Could not deliver payment support message from user %s",uid)
+                await message.answer("Не получилось отправить обращение. Попробуй ещё раз позже.")
+            return
+        if uid in advisor_sessions:
+            if text.casefold() in {"отмена","/cancel","готово","завершить"}:
+                advisor_sessions.pop(uid,None)
+                await message.answer("Консультация завершена. Бесплатные рецепты доступны в меню 🍲",reply_markup=main_menu())
+                return
+            await advisor_answer(message,uid,text)
+            return
+        if text=="👩‍🍳 ИИ-советчик":
+            await show_plus(message,uid)
             return
         if text=="🧺 Из моих продуктов":
             pantry_mode.add(uid); pantry_results.discard(uid)
@@ -711,6 +918,85 @@ async def main():
         else:
             answer="Блюдо исключено из рекомендаций" if enabled else "Блюдо вернулось в рекомендации"
         await call.answer(answer)
+
+    @dp.callback_query(F.data.startswith("plus:"))
+    async def plus_action(call):
+        action=call.data.split(":",1)[1]
+        uid=call.from_user.id
+        if action=="home":
+            await show_plus(call.message,uid,edit=True)
+        elif action=="terms":
+            await show_plus_terms(call.message,uid)
+        elif action=="accept":
+            if not plus_ready():
+                await call.answer("Dishly Plus ещё не настроен",show_alert=True)
+                return
+            db.accept_plus_terms(uid)
+            await send_plus_invoice(call.message,uid)
+        elif action=="subscribe":
+            await send_plus_invoice(call.message,uid)
+        elif action=="refresh":
+            await show_plus(call.message,uid,edit=True)
+        elif action=="cancel":
+            row=db.plus_subscription(uid)
+            if not row or not db.plus_active(uid):
+                await call.answer("Активная подписка не найдена",show_alert=True)
+                await show_plus(call.message,uid,edit=True)
+                return
+            if row[2]:
+                await call.answer("Автопродление уже отключено")
+                return
+            try:
+                await bot.edit_user_star_subscription(user_id=uid,telegram_payment_charge_id=row[1],is_canceled=True)
+                db.cancel_plus_renewal(uid)
+                await call.answer("Автопродление отключено")
+                await show_plus(call.message,uid,edit=True)
+            except TelegramAPIError:
+                logging.exception("Could not cancel Dishly Plus subscription for user %s",uid)
+                await call.answer("Не удалось отключить автопродление. Напиши /paysupport",show_alert=True)
+
+    @dp.callback_query(F.data=="advisor:start")
+    async def advisor_start(call):
+        uid=call.from_user.id
+        if not db.plus_active(uid):
+            advisor_sessions.pop(uid,None)
+            await show_plus(call.message,uid)
+            await call.answer("Нужна активная подписка Dishly Plus")
+            return
+        advisor_sessions.setdefault(uid,[])
+        await call.message.answer("👩‍🍳 Напиши, что хочется приготовить или какие продукты есть. Учитываю настройки профиля; можно завершить кнопкой ниже.",reply_markup=advisor_cancel_keyboard())
+        await call.answer()
+
+    @dp.callback_query(F.data=="advisor:stop")
+    async def advisor_stop(call):
+        advisor_sessions.pop(call.from_user.id,None)
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.answer("Консультация завершена")
+
+    @dp.pre_checkout_query()
+    async def plus_pre_checkout(query):
+        valid=(query.invoice_payload=="dishly_plus_monthly_v1" and query.currency=="XTR" and
+               query.total_amount==config.plus_monthly_stars and plus_ready() and
+               db.plus_terms_accepted(query.from_user.id) and not db.plus_active(query.from_user.id))
+        if valid:
+            await query.answer(ok=True)
+        else:
+            await query.answer(ok=False,error_message="Не удалось подтвердить Dishly Plus. Открой раздел Plus и попробуй снова.")
+
+    @dp.message(F.successful_payment)
+    async def plus_successful_payment(message):
+        payment=message.successful_payment
+        if payment.invoice_payload!="dishly_plus_monthly_v1":
+            return
+        if payment.currency!="XTR" or payment.total_amount<1:
+            logging.error("Dishly Plus payment currency/amount invalid for user %s",message.from_user.id)
+            await message.answer("Платёж получен, но не удалось автоматически активировать подписку. Напиши /paysupport.")
+            return
+        now=int(datetime.now(timezone.utc).timestamp())
+        expires=payment.subscription_expiration_date or now+2592000
+        recorded=db.record_plus_payment(message.from_user.id,payment.total_amount,payment.currency,payment.telegram_payment_charge_id,expires,now)
+        if recorded:
+            await message.answer("🎉 Dishly Plus активирован! Открой «Ещё» → «ИИ-советчик». Автопродление можно отключить командой /plus.")
 
     @dp.callback_query(F.data.startswith("report:start:"))
     async def start_recipe_report(call):
