@@ -34,11 +34,31 @@ def plus_terms_keyboard():
         [InlineKeyboardButton(text="Назад",callback_data="plus:home")],
     ])
 
+def advisor_terms_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Прочитал(а), продолжить",callback_data="advisor:terms_accept")],
+        [InlineKeyboardButton(text="В меню",callback_data="menu")],
+    ])
+
 def advisor_test_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👩‍🍳 Спросить советчика",callback_data="advisor:start")],
         [InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
+
+def admin_access_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎟 Код на 7 дней",callback_data="admin:key:7"),InlineKeyboardButton(text="🎟 Код на 30 дней",callback_data="admin:key:30")],
+        [InlineKeyboardButton(text="🎟 Код на 90 дней",callback_data="admin:key:90")],
+        [InlineKeyboardButton(text="🗂 Неиспользованные коды",callback_data="admin:keys")],
+        [InlineKeyboardButton(text="👥 Доступы по кодам",callback_data="admin:users")],
+        [InlineKeyboardButton(text="🏠 Главное меню",callback_data="menu")],
+    ])
+
+def admin_access_users_keyboard(users):
+    rows=[[InlineKeyboardButton(text=f"🚫 Отозвать {uid}",callback_data=f"admin:revoke:{uid}")] for uid in users]
+    rows.append([InlineKeyboardButton(text="⬅️ В админ-панель",callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def advisor_cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Завершить консультацию",callback_data="advisor:stop")]])

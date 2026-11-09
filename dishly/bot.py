@@ -6,6 +6,7 @@ import random
 import re
 import html
 import json
+import secrets
 import aiohttp
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery, LabeledPrice, Rep
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard, advisor_test_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard, advisor_test_keyboard, admin_access_keyboard, admin_access_users_keyboard, advisor_terms_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -175,15 +176,20 @@ async def main():
         return bool(config.ai_api_key and config.plus_monthly_stars and config.admin_telegram_id)
 
     def advisor_access(uid):
-        return db.plus_active(uid) or bool(config.ai_api_key and config.admin_telegram_id==uid)
+        return db.plus_active(uid) or bool(db.plus_key_access(uid)) or bool(config.ai_api_key and config.admin_telegram_id==uid)
 
     async def show_plus(message, uid, edit=False):
-        row=db.plus_subscription(uid); active=db.plus_active(uid)
+        row=db.plus_subscription(uid); active=db.plus_active(uid); key_expiry=db.plus_key_access(uid)
         expires=datetime.fromtimestamp(row[0],timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M") if row else None
         test_access=bool(not active and config.ai_api_key and config.admin_telegram_id==uid)
         if test_access:
             text=("🧪 <b>Тестовый доступ владельца</b>\n\n"
                   "Можешь проверять ИИ-советчика без подписки. Для остальных пользователей Dishly Plus откроется после настройки цены и оплаты.")
+            markup=advisor_test_keyboard()
+        elif key_expiry and not active:
+            expires=datetime.fromtimestamp(key_expiry,timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
+            text=(f"🎟 <b>Доступ к ИИ-шефу активирован</b> до {expires}.\n\n"
+                  f"Доступно до {config.advisor_daily_limit} обращений в день. Подписка и каталог Dishly остаются отдельными разделами.")
             markup=advisor_test_keyboard()
         elif active:
             auto="Автопродление отключено." if row[2] else "Подписка продлевается автоматически раз в месяц."
@@ -193,7 +199,8 @@ async def main():
         else:
             text=("✨ <b>Dishly Plus</b>\n\n"
                   "Личный ИИ-советчик поможет выбрать блюдо и подобрать подходящие рецепты из каталога, учитывая твои настройки.\n\n"
-                  "Бесплатный каталог, фильтры и план на 3 дня останутся доступны всем.")
+                  "Бесплатный каталог, фильтры и план на 3 дня останутся доступны всем.\n"
+                  "Есть код доступа? Отправь <code>/activate КОД</code>.")
             if config.plus_monthly_stars:
                 text+=f"\n\nЦена: {config.plus_monthly_stars} ⭐ в месяц."
             if not config.ai_api_key:
@@ -206,7 +213,15 @@ async def main():
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
-    async def show_plus_terms(message, uid):
+    async def show_plus_terms(message, uid, access_code=False):
+        if access_code:
+            text=("📄 <b>Условия ИИ-шефа</b>\n\n"
+                  "🎟 Доступ активирован кодом и действует указанный срок. За этот код бот не списывает Stars.\n"
+                  "🔐 Текст запроса, число порций, ограничения питания, доступная техника и подходящие рецепты отправляются настроенному AI-провайдеру и выбранной модели. Telegram ID и имя не передаются.\n"
+                  "⚠️ Ответы ИИ могут содержать ошибки и не заменяют рекомендации врача. При аллергиях Dishly отбирает рецепты локально, но всегда проверяй состав и упаковку продуктов.\n\n"
+                  "Нажимая кнопку ниже, ты подтверждаешь, что прочитал(а) условия и согласен(на) на обработку текста запроса AI-провайдером и выбранной моделью.")
+            await message.answer(text,parse_mode="HTML",reply_markup=advisor_terms_keyboard())
+            return
         price_text=f"{config.plus_monthly_stars} Telegram Stars" if config.plus_monthly_stars else "цена будет показана перед оплатой после настройки"
         text=("📄 <b>Условия Dishly Plus</b>\n\n"
               f"• Цена: {price_text} в месяц. Подписка продлевается автоматически раз в 30 дней.\n"
@@ -240,7 +255,11 @@ async def main():
     async def advisor_answer(message, uid, question):
         if not advisor_access(uid):
             advisor_sessions.pop(uid,None)
-            await message.answer("Подписка Dishly Plus не активна или истекла.",reply_markup=main_menu())
+            await message.answer("🔒 Для ИИ-шефа нужен Dishly Plus или код доступа. Если у тебя есть код, отправь <code>/activate КОД</code>. Каталог и остальные функции остаются бесплатными.",parse_mode="HTML",reply_markup=main_menu())
+            return
+        if not db.plus_terms_accepted(uid):
+            advisor_sessions.pop(uid,None)
+            await show_plus_terms(message,uid,access_code=bool(db.plus_key_access(uid)) or uid==config.admin_telegram_id)
             return
         if len(question)>1200:
             await message.answer("Вопрос слишком длинный. Сократи его до 1200 символов.",reply_markup=advisor_cancel_keyboard())
@@ -258,7 +277,10 @@ async def main():
         else:
             candidates=random.sample(available,min(8,len(available))) if available else []
         compact=[{"id":r["id"],"title":r["title"],"minutes":r["minutes"],"kcal":r["kcal_per_serving"],"ingredients":[i["name"] for i in r["ingredients"] if not i.get("optional",False)]} for r in candidates]
-        system=("Ты — кулинарный советчик Dishly. Отвечай по-русски, коротко, тепло и практично. "
+        system=("Ты — личный ИИ-шеф Dishly. Отвечай по-русски тепло, живо и подробно, но без воды. "
+                "Оформляй ответ ярко и легко для чтения: используй уместные эмодзи в заголовках и разделах (примерно 1–3 на абзац), "
+                "короткие смысловые блоки, списки и выделение **жирным** для названий блюд, времени и важных советов. Не делай ответ скудным или телеграфным. "
+                "Если просят рецепт — подробно распиши ингредиенты и шаги приготовления; если просят идею или выбор, объясни вкус, удобство и почему блюдо подходит. "
                 "Подбирай только из переданного списка recipes. Не выдумывай блюда, ингредиенты, калории или факты о безопасности. "
                 "Если подходящего блюда нет, задай уточняющий вопрос или объясни это. Не предлагай ничего из excluded; список candidates уже отфильтрован, не пытайся его расширить. "
                 "Не давай медицинских советов и не обещай безопасность для аллергиков; напоминай проверять этикетки при вопросах об аллергии. "
@@ -272,7 +294,7 @@ async def main():
                 async with client.post(
                     f"{config.ai_base_url}/chat/completions",
                     headers={"Authorization":f"Bearer {config.ai_api_key}","Content-Type":"application/json"},
-                    json={"model":config.ai_model,"messages":messages,"response_format":{"type":"json_object"},"max_tokens":500,"temperature":0.4},
+                    json={"model":config.ai_model,"messages":messages,"response_format":{"type":"json_object"},"max_tokens":900,"temperature":0.55},
                     proxy=config.ai_proxy or None,
                 ) as response:
                     if response.status!=200:
@@ -291,7 +313,9 @@ async def main():
                 if len(selected)==3: break
             history.extend([{"role":"user","content":json.dumps(user_payload,ensure_ascii=False)},{"role":"assistant","content":content}])
             advisor_sessions[uid]=history[-8:]
-            await message.answer(answer,reply_markup=advisor_recipes_keyboard(selected) if selected else advisor_cancel_keyboard())
+            safe_answer=html.escape(answer)
+            safe_answer=re.sub(r"\*\*(.+?)\*\*",r"<b>\1</b>",safe_answer,flags=re.S)
+            await message.answer(f"👩‍🍳 <b>Совет шефа Dishly</b>\n\n{safe_answer}",parse_mode="HTML",reply_markup=advisor_recipes_keyboard(selected) if selected else advisor_cancel_keyboard())
         except (aiohttp.ClientError,asyncio.TimeoutError,KeyError,IndexError,TypeError,ValueError) as exc:
             logging.warning("DeepSeek advisor request failed: %s",type(exc).__name__)
             await message.answer("Не смог связаться с советчиком. Попробуй позже.",reply_markup=advisor_cancel_keyboard())
@@ -353,6 +377,27 @@ async def main():
     @dp.message(Command("plus"))
     async def plus_cmd(message):
         await show_plus(message,message.from_user.id)
+
+    @dp.message(Command("admin"))
+    async def admin_cmd(message):
+        if not config.admin_telegram_id or message.from_user.id!=config.admin_telegram_id:
+            await message.answer("Команда доступна только администратору бота.")
+            return
+        await message.answer("🛠 <b>Админ-панель Dishly</b>\n\nУправление доступом к ИИ-шефу. Каталог и остальные функции бота доступны всем.",parse_mode="HTML",reply_markup=admin_access_keyboard())
+
+    @dp.message(Command("activate"))
+    async def activate_ai_access(message):
+        parts=(message.text or "").split(maxsplit=1)
+        if len(parts)!=2 or not parts[1].strip():
+            await message.answer("🎟 Чтобы активировать доступ к ИИ-шефу, отправь код так: <code>/activate КОД</code>",parse_mode="HTML")
+            return
+        expires=db.redeem_plus_access_key(parts[1].strip(),message.from_user.id)
+        if not expires:
+            await message.answer("⚠️ Код не найден, уже использован или отозван. Проверь его и попробуй ещё раз.")
+            return
+        when=datetime.fromtimestamp(expires,timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
+        await message.answer(f"🎉 Код активирован! Доступ к ИИ-шефу открыт до {when}.\n\nСначала ознакомься с условиями обработки запросов:")
+        await show_plus_terms(message,message.from_user.id,access_code=True)
 
     @dp.message(Command("terms"))
     async def terms_cmd(message):
@@ -937,6 +982,11 @@ async def main():
         elif action=="terms":
             await show_plus_terms(call.message,uid)
         elif action=="accept":
+            if db.plus_active(uid) or db.plus_key_access(uid) or (config.ai_api_key and uid==config.admin_telegram_id):
+                db.accept_plus_terms(uid)
+                await show_plus(call.message,uid,edit=True)
+                await call.answer("Условия приняты")
+                return
             if not plus_ready():
                 await call.answer("Dishly Plus ещё не настроен",show_alert=True)
                 return
@@ -964,13 +1014,70 @@ async def main():
                 logging.exception("Could not cancel Dishly Plus subscription for user %s",uid)
                 await call.answer("Не удалось отключить автопродление. Напиши /paysupport",show_alert=True)
 
+    @dp.callback_query(F.data.startswith("admin:"))
+    async def admin_access_action(call):
+        uid=call.from_user.id
+        if not config.admin_telegram_id or uid!=config.admin_telegram_id:
+            await call.answer("Только для администратора",show_alert=True)
+            return
+        parts=call.data.split(":")
+        action=parts[1]
+        if action=="home":
+            await call.message.edit_text("🛠 <b>Админ-панель Dishly</b>\n\nУправление доступом к ИИ-шефу. Каталог и остальные функции бота доступны всем.",parse_mode="HTML",reply_markup=admin_access_keyboard())
+        elif action=="key" and len(parts)==3 and parts[2] in {"7","30","90"}:
+            days=int(parts[2]); code=secrets.token_urlsafe(9).replace("-","").replace("_","").upper()
+            db.create_plus_access_key(code,days,uid)
+            await call.message.answer(f"🎟 Код на {days} дн. создан. Он одноразовый, действует сразу после активации и продлевает уже имеющийся доступ.\n\n<code>{code}</code>\n\nСкопируй и отправь его пользователю. Бот хранит только хэш кода, повторно показать его нельзя.",parse_mode="HTML")
+            await call.answer("Код выпущен")
+        elif action=="keys":
+            rows=db.unused_plus_access_keys()
+            if rows:
+                body="🗂 <b>Неиспользованные коды</b> (последние 20)\n\n"+"\n".join(f"• …{row[0]} — {row[1]} дн., создан {datetime.fromtimestamp(row[2],timezone.utc).astimezone().strftime('%d.%m %H:%M')}" for row in rows)
+            else:
+                body="🗂 Неиспользованных кодов пока нет. Полные коды повторно не хранятся, поэтому показаны только последние 4 символа."
+            await call.message.edit_text(body,parse_mode="HTML",reply_markup=admin_access_keyboard())
+        elif action=="users":
+            rows=db.active_plus_key_users()
+            if not rows:
+                await call.message.edit_text("👥 Сейчас нет активных доступов, выданных кодами.",reply_markup=admin_access_keyboard())
+            else:
+                users={row[0]:datetime.fromtimestamp(row[1],timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M") for row in rows}
+                body="👥 <b>Активные доступы к ИИ-шефу по кодам</b>\n\n"+"\n".join(f"• <code>{user_id}</code> до {expiry}" for user_id,expiry in users.items())
+                await call.message.edit_text(body,parse_mode="HTML",reply_markup=admin_access_users_keyboard(users))
+        elif action=="revoke" and len(parts)==3 and parts[2].isdigit():
+            target=int(parts[2]); count=db.revoke_plus_key_access(target)
+            await call.answer("Доступ по коду отозван" if count else "Активный доступ по коду не найден",show_alert=True)
+            rows=db.active_plus_key_users()
+            users={row[0]:datetime.fromtimestamp(row[1],timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M") for row in rows}
+            if users:
+                body="👥 <b>Активные доступы к ИИ-шефу по кодам</b>\n\n"+"\n".join(f"• <code>{user_id}</code> до {expiry}" for user_id,expiry in users.items())
+                await call.message.edit_text(body,parse_mode="HTML",reply_markup=admin_access_users_keyboard(users))
+            else:
+                await call.message.edit_text("👥 Активных доступов по кодам нет.",reply_markup=admin_access_keyboard())
+        else:
+            await call.answer("Неизвестное действие",show_alert=True)
+
+    @dp.callback_query(F.data=="advisor:terms_accept")
+    async def advisor_terms_accept(call):
+        uid=call.from_user.id
+        if not advisor_access(uid):
+            await call.answer("Сначала активируй код или подписку",show_alert=True)
+            return
+        db.accept_plus_terms(uid)
+        await show_plus(call.message,uid,edit=True)
+        await call.answer("Условия приняты")
+
     @dp.callback_query(F.data=="advisor:start")
     async def advisor_start(call):
         uid=call.from_user.id
         if not advisor_access(uid):
             advisor_sessions.pop(uid,None)
             await show_plus(call.message,uid)
-            await call.answer("Нужна активная подписка Dishly Plus")
+            await call.answer("Нужен Plus или код доступа")
+            return
+        if not db.plus_terms_accepted(uid):
+            await show_plus_terms(call.message,uid,access_code=bool(db.plus_key_access(uid)) or uid==config.admin_telegram_id)
+            await call.answer("Сначала прочитай условия",show_alert=True)
             return
         advisor_sessions.setdefault(uid,[])
         await call.message.answer("👩‍🍳 Напиши, что хочется приготовить или какие продукты есть. Учитываю настройки профиля.",reply_markup=ReplyKeyboardRemove())

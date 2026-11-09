@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sqlite3
 from datetime import date, datetime, timezone
 
@@ -28,6 +29,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS plus_accounts(user_id INTEGER PRIMARY KEY, terms_accepted INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS plus_subscriptions(user_id INTEGER PRIMARY KEY, expires_at INTEGER NOT NULL, charge_id TEXT NOT NULL, canceled INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS plus_payments(charge_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, currency TEXT NOT NULL, paid_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, refunded INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS plus_access_keys(code_hash TEXT PRIMARY KEY, key_hint TEXT NOT NULL, duration_days INTEGER NOT NULL, created_by INTEGER NOT NULL, created_at INTEGER NOT NULL, redeemed_by INTEGER, redeemed_at INTEGER, expires_at INTEGER, revoked_at INTEGER);
         CREATE TABLE IF NOT EXISTS advisor_usage(user_id INTEGER NOT NULL, day TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,day));
         """)
         user_columns={row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
@@ -173,6 +175,44 @@ class Database:
     def plus_active(self, uid, now=None):
         row=self.plus_subscription(uid)
         return bool(row and row[0]>(now or int(datetime.now(timezone.utc).timestamp())))
+
+    @staticmethod
+    def _access_key_hash(code):
+        return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+
+    def create_plus_access_key(self, code, days, admin_id, now=None):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        with self.conn:
+            self.conn.execute("INSERT INTO plus_access_keys(code_hash,key_hint,duration_days,created_by,created_at) VALUES(?,?,?,?,?)",(self._access_key_hash(code),code[-4:].upper(),days,admin_id,now))
+
+    def redeem_plus_access_key(self, code, uid, now=None):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        with self.conn:
+            row=self.conn.execute("SELECT code_hash,duration_days,redeemed_by,revoked_at FROM plus_access_keys WHERE code_hash=?",(self._access_key_hash(code),)).fetchone()
+            if not row or row[2] is not None or row[3] is not None:
+                return None
+            existing=self.conn.execute("SELECT MAX(expires_at) FROM plus_access_keys WHERE redeemed_by=? AND revoked_at IS NULL AND expires_at>?",(uid,now)).fetchone()[0]
+            subscription=self.plus_subscription(uid)
+            start=max(now,existing or now,subscription[0] if subscription and subscription[0]>now else now)
+            expires=start+row[1]*86400
+            self.conn.execute("UPDATE plus_access_keys SET redeemed_by=?,redeemed_at=?,expires_at=? WHERE code_hash=? AND redeemed_by IS NULL",(uid,now,expires,row[0]))
+        return expires
+
+    def plus_key_access(self, uid, now=None):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        return self.conn.execute("SELECT MAX(expires_at) FROM plus_access_keys WHERE redeemed_by=? AND revoked_at IS NULL AND expires_at>?",(uid,now)).fetchone()[0]
+
+    def revoke_plus_key_access(self, uid, now=None):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        with self.conn:
+            return self.conn.execute("UPDATE plus_access_keys SET revoked_at=? WHERE redeemed_by=? AND revoked_at IS NULL AND expires_at>?",(now,uid,now)).rowcount
+
+    def unused_plus_access_keys(self, limit=20):
+        return self.conn.execute("SELECT key_hint,duration_days,created_at FROM plus_access_keys WHERE redeemed_by IS NULL AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?",(limit,)).fetchall()
+
+    def active_plus_key_users(self, now=None, limit=20):
+        now=now or int(datetime.now(timezone.utc).timestamp())
+        return self.conn.execute("SELECT redeemed_by,MAX(expires_at) FROM plus_access_keys WHERE redeemed_by IS NOT NULL AND revoked_at IS NULL AND expires_at>? GROUP BY redeemed_by ORDER BY MAX(expires_at) DESC LIMIT ?",(now,limit)).fetchall()
 
     def record_plus_payment(self, uid, amount, currency, charge_id, expires_at, now=None):
         now=now or int(datetime.now(timezone.utc).timestamp())
