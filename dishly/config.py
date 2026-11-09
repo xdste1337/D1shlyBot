@@ -13,8 +13,10 @@ class Config:
     bot_token: str
     database_path: str
     admin_telegram_id: int | None
-    deepseek_api_key: str
-    deepseek_model: str
+    ai_api_key: str
+    ai_base_url: str
+    ai_model: str
+    ai_proxy: str
     plus_monthly_stars: int
     advisor_daily_limit: int
 
@@ -28,8 +30,10 @@ def load_config() -> Config:
         admin_telegram_id = int(admin_id) if admin_id else None
     except ValueError as exc:
         raise ValueError("ADMIN_TELEGRAM_ID must be a numeric Telegram user ID.") from exc
-    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-flash").strip() or "deepseek-flash"
+    api_key = os.getenv("AI_API_KEY", os.getenv("DEEPSEEK_API_KEY", "")).strip()
+    base_url = os.getenv("AI_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+    model = os.getenv("AI_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-flash")).strip() or "deepseek-flash"
+    proxy = os.getenv("AI_PROXY", os.getenv("DEEPSEEK_PROXY", "")).strip()
     raw_price = os.getenv("PLUS_MONTHLY_STARS", "").strip()
     try:
         price = int(raw_price) if raw_price else 0
@@ -45,7 +49,9 @@ def load_config() -> Config:
         os.getenv("DATABASE_PATH", str(ROOT / "dishly.sqlite3")),
         admin_telegram_id,
         api_key,
+        base_url,
         model,
+        proxy,
         price,
         daily_limit,
     )

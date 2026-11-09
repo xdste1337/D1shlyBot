@@ -172,15 +172,15 @@ async def main():
         return db.get_recipe(rid)
 
     def plus_ready():
-        return bool(config.deepseek_api_key and config.plus_monthly_stars and config.admin_telegram_id)
+        return bool(config.ai_api_key and config.plus_monthly_stars and config.admin_telegram_id)
 
     def advisor_access(uid):
-        return db.plus_active(uid) or bool(config.deepseek_api_key and config.admin_telegram_id==uid)
+        return db.plus_active(uid) or bool(config.ai_api_key and config.admin_telegram_id==uid)
 
     async def show_plus(message, uid, edit=False):
         row=db.plus_subscription(uid); active=db.plus_active(uid)
         expires=datetime.fromtimestamp(row[0],timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M") if row else None
-        test_access=bool(not active and config.deepseek_api_key and config.admin_telegram_id==uid)
+        test_access=bool(not active and config.ai_api_key and config.admin_telegram_id==uid)
         if test_access:
             text=("🧪 <b>Тестовый доступ владельца</b>\n\n"
                   "Можешь проверять ИИ-советчика без подписки. Для остальных пользователей Dishly Plus откроется после настройки цены и оплаты.")
@@ -196,8 +196,8 @@ async def main():
                   "Бесплатный каталог, фильтры и план на 3 дня останутся доступны всем.")
             if config.plus_monthly_stars:
                 text+=f"\n\nЦена: {config.plus_monthly_stars} ⭐ в месяц."
-            if not config.deepseek_api_key:
-                text+="\n\nПока не настроен ключ DeepSeek API."
+            if not config.ai_api_key:
+                text+="\n\nПока не настроен ключ AI API."
             if not config.plus_monthly_stars:
                 text+="\nПока не задана цена подписки в Stars."
             if not config.admin_telegram_id:
@@ -211,10 +211,10 @@ async def main():
         text=("📄 <b>Условия Dishly Plus</b>\n\n"
               f"• Цена: {price_text} в месяц. Подписка продлевается автоматически раз в 30 дней.\n"
               "• Отключить автопродление можно в разделе Dishly Plus; доступ сохранится до конца оплаченного периода.\n"
-              "• Советчик отправляет текст запроса, число порций, ограничения питания, доступную технику и подходящие рецепты в DeepSeek API. Telegram ID и имя туда не передаются.\n"
+              "• Советчик отправляет текст запроса, число порций, ограничения питания, доступную технику и подходящие рецепты через настроенного AI-провайдера и выбранную модель. Telegram ID и имя туда не передаются.\n"
               "• Ответы ИИ могут содержать ошибки и не заменяют рекомендации врача. При аллергиях Dishly исключает рецепты локально, но всегда проверяй состав и упаковку продуктов.\n"
               "• По вопросам оплаты используй команду /paysupport. Вопросы по возврату рассматриваются индивидуально согласно правилам Telegram.\n\n"
-              "Нажимая кнопку ниже, ты подтверждаешь, что прочитал условия и согласен на обработку текста запроса через DeepSeek API.")
+              "Нажимая кнопку ниже, ты подтверждаешь, что прочитал условия и согласен на обработку текста запроса AI-провайдером и выбранной моделью.")
         await message.answer(text,parse_mode="HTML",reply_markup=plus_terms_keyboard())
 
     async def send_plus_invoice(message, uid):
@@ -270,13 +270,13 @@ async def main():
             timeout=aiohttp.ClientTimeout(total=45)
             async with aiohttp.ClientSession(timeout=timeout) as client:
                 async with client.post(
-                    "https://api.deepseek.com/chat/completions",
-                    headers={"Authorization":f"Bearer {config.deepseek_api_key}","Content-Type":"application/json"},
-                    json={"model":config.deepseek_model,"messages":messages,"response_format":{"type":"json_object"},"max_tokens":500,"temperature":0.4,"thinking":{"type":"disabled"}},
-                    proxy=os.getenv("DEEPSEEK_PROXY") or None,
+                    f"{config.ai_base_url}/chat/completions",
+                    headers={"Authorization":f"Bearer {config.ai_api_key}","Content-Type":"application/json"},
+                    json={"model":config.ai_model,"messages":messages,"response_format":{"type":"json_object"},"max_tokens":500,"temperature":0.4},
+                    proxy=config.ai_proxy or None,
                 ) as response:
                     if response.status!=200:
-                        logging.error("DeepSeek API returned HTTP %s",response.status)
+                        logging.error("AI API returned HTTP %s",response.status)
                         await message.answer("Советчик сейчас не ответил. Попробуй чуть позже.",reply_markup=advisor_cancel_keyboard())
                         return
                     result=await response.json()
