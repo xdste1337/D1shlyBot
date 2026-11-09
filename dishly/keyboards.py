@@ -34,6 +34,12 @@ def plus_terms_keyboard():
         [InlineKeyboardButton(text="Назад",callback_data="plus:home")],
     ])
 
+def advisor_test_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👩‍🍳 Спросить советчика",callback_data="advisor:start")],
+        [InlineKeyboardButton(text="В меню",callback_data="menu")],
+    ])
+
 def advisor_cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Завершить консультацию",callback_data="advisor:stop")]])
 

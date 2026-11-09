@@ -18,7 +18,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery, LabeledPrice
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard, plus_keyboard, plus_terms_keyboard, advisor_cancel_keyboard, advisor_recipes_keyboard, advisor_test_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -174,13 +174,22 @@ async def main():
     def plus_ready():
         return bool(config.deepseek_api_key and config.plus_monthly_stars and config.admin_telegram_id)
 
+    def advisor_access(uid):
+        return db.plus_active(uid) or bool(config.deepseek_api_key and config.admin_telegram_id==uid)
+
     async def show_plus(message, uid, edit=False):
         row=db.plus_subscription(uid); active=db.plus_active(uid)
         expires=datetime.fromtimestamp(row[0],timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M") if row else None
-        if active:
+        test_access=bool(not active and config.deepseek_api_key and config.admin_telegram_id==uid)
+        if test_access:
+            text=("🧪 <b>Тестовый доступ владельца</b>\n\n"
+                  "Можешь проверять ИИ-советчика без подписки. Для остальных пользователей Dishly Plus откроется после настройки цены и оплаты.")
+            markup=advisor_test_keyboard()
+        elif active:
             auto="Автопродление отключено." if row[2] else "Подписка продлевается автоматически раз в месяц."
             text=(f"👩‍🍳 <b>Dishly Plus активен</b> до {expires}.\n{auto}\n\n"
                   f"Доступно до {config.advisor_daily_limit} обращений к советчику в день.")
+            markup=plus_keyboard(active,db.plus_terms_accepted(uid),plus_ready(),bool(row and row[2]))
         else:
             text=("✨ <b>Dishly Plus</b>\n\n"
                   "Личный ИИ-советчик поможет выбрать блюдо и подобрать подходящие рецепты из каталога, учитывая твои настройки.\n\n"
@@ -193,7 +202,7 @@ async def main():
                 text+="\nПока не задана цена подписки в Stars."
             if not config.admin_telegram_id:
                 text+="\nНе настроен контакт поддержки платежей."
-        markup=plus_keyboard(active,db.plus_terms_accepted(uid),plus_ready(),bool(row and row[2]))
+            markup=plus_keyboard(active,db.plus_terms_accepted(uid),plus_ready(),bool(row and row[2]))
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
@@ -229,7 +238,7 @@ async def main():
         )
 
     async def advisor_answer(message, uid, question):
-        if not db.plus_active(uid):
+        if not advisor_access(uid):
             advisor_sessions.pop(uid,None)
             await message.answer("Подписка Dishly Plus не активна или истекла.",reply_markup=main_menu())
             return
@@ -958,7 +967,7 @@ async def main():
     @dp.callback_query(F.data=="advisor:start")
     async def advisor_start(call):
         uid=call.from_user.id
-        if not db.plus_active(uid):
+        if not advisor_access(uid):
             advisor_sessions.pop(uid,None)
             await show_plus(call.message,uid)
             await call.answer("Нужна активная подписка Dishly Plus")
