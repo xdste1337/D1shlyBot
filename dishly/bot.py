@@ -9,13 +9,13 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.exceptions import TelegramNetworkError
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, Message, CallbackQuery
 
 from .config import load_config
 from .database import Database
-from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard
+from .keyboards import main_menu, more_menu, recipe_keyboard, dish_day_keyboard, dish_alternative_keyboard, catalog_keyboard, catalog_card_keyboard, all_catalog_keyboard, all_catalog_card_keyboard, filter_home_keyboard, filter_options_keyboard, filter_time_keyboard, filtered_results_keyboard, filtered_card_keyboard, list_keyboard, meal_plan_keyboard, meal_plan_recipe_keyboard, meal_plan_unavailable_keyboard, shopping_list_keyboard, unknown_keyboard, settings_keyboard, servings_keyboard, restriction_keyboard, first_start_keyboard, equipment_keyboard, pantry_prompt_keyboard, setup_reset_keyboard, report_cancel_keyboard
 from .parser import parse_query
 from .search import blocked, filter_recipes, rank_recipes, rank_pantry_recipes, pantry_substitutions, recipe_ingredients, canonical
 
@@ -26,6 +26,7 @@ filter_states = {}
 filter_results = {}
 pantry_mode = set()
 pantry_results = set()
+report_mode = {}
 MAX_INPUT = 500
 FILTER_METHODS = ["микроволновка","аэрогриль","кастрюля","сковорода","духовка","без готовки"]
 EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
@@ -219,10 +220,55 @@ async def main():
     async def help_cmd(message):
         await message.answer("💡 Напиши продукты или пожелания обычным текстом: «сытное из курицы без духовки». Ещё можно искать через фильтры, листать каталог, сохранять любимые рецепты и собирать план на 3 дня ⭐",reply_markup=main_menu())
 
+    @dp.message(Command("id"))
+    async def id_cmd(message):
+        await message.answer(f"Твой Telegram user ID: <code>{message.from_user.id}</code>\nУкажи его в .env в строке ADMIN_TELEGRAM_ID, чтобы получать сообщения о проблемах с рецептами.",parse_mode="HTML")
+
+    @dp.message(Command("reports"))
+    async def reports_cmd(message):
+        if not config.admin_telegram_id or message.from_user.id != config.admin_telegram_id:
+            await message.answer("Команда доступна только администратору бота.")
+            return
+        reports=db.pending_recipe_reports()
+        if not reports:
+            await message.answer("Неразосланных сообщений о рецептах нет.")
+            return
+        for report in reports:
+            recipe=db.get_recipe(report[2]); title=recipe["title"] if recipe else report[2]
+            body=(f"⚠️ <b>Сообщение #{report[0]}</b> · {report[4]}\n"
+                  f"Рецепт: <b>{html.escape(title)}</b>\n"
+                  f"От пользователя: <code>{report[1]}</code>\n\n{html.escape(report[3])}")
+            await message.answer(body,parse_mode="HTML")
+
     @dp.message(F.text)
     async def text_handler(message: Message):
         text=message.text.strip()
         uid=message.from_user.id
+        if uid in report_mode:
+            if text.casefold() in {"отмена","/cancel"}:
+                report_mode.pop(uid,None)
+                await message.answer("Сообщение о проблеме отменено.",reply_markup=main_menu())
+                return
+            if len(text)>1000:
+                await message.answer("Сообщение слишком длинное. Опиши проблему в пределах 1000 символов или нажми «Отмена».",reply_markup=report_cancel_keyboard())
+                return
+            rid=report_mode.pop(uid)
+            recipe=db.get_recipe(rid)
+            if not recipe:
+                await message.answer("Не нашёл этот рецепт. Открой карточку снова и попробуй ещё раз.",reply_markup=main_menu())
+                return
+            report_id=db.add_recipe_report(uid,rid,text)
+            if config.admin_telegram_id:
+                body=(f"⚠️ <b>Проблема с рецептом #{report_id}</b>\n"
+                      f"Рецепт: <b>{html.escape(recipe['title'])}</b> (<code>{rid}</code>)\n"
+                      f"От пользователя: <code>{uid}</code>\n\n{html.escape(text)}")
+                try:
+                    await bot.send_message(config.admin_telegram_id,body,parse_mode="HTML")
+                    db.mark_recipe_report_delivered(report_id)
+                except TelegramAPIError:
+                    logging.warning("Could not deliver recipe report %s to configured admin",report_id)
+            await message.answer("Спасибо! Сохранил сообщение о проблеме с рецептом 📝",reply_markup=main_menu())
+            return
         if text=="🧺 Из моих продуктов":
             pantry_mode.add(uid); pantry_results.discard(uid)
             await message.answer("🧺 Перечисли продукты, которые у тебя есть, через запятую. Например: курица, рис, морковь.\n\nПокажу блюда, где используются эти продукты, и отмечу, что ещё понадобится. Необязательные соль и вода указывать не нужно.",reply_markup=pantry_prompt_keyboard())
@@ -665,6 +711,22 @@ async def main():
         else:
             answer="Блюдо исключено из рекомендаций" if enabled else "Блюдо вернулось в рекомендации"
         await call.answer(answer)
+
+    @dp.callback_query(F.data.startswith("report:start:"))
+    async def start_recipe_report(call):
+        rid=call.data.split(":",2)[2]
+        recipe=db.get_recipe(rid)
+        if not recipe:
+            await call.answer("Рецепт не найден",show_alert=True); return
+        report_mode[call.from_user.id]=rid
+        await call.message.answer(f"⚠️ Что не так с рецептом «{html.escape(recipe['title'])}»? Опиши ошибку или что стоит поправить. До 1000 символов.",parse_mode="HTML",reply_markup=report_cancel_keyboard())
+        await call.answer()
+
+    @dp.callback_query(F.data=="report:cancel")
+    async def cancel_recipe_report(call):
+        report_mode.pop(call.from_user.id,None)
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.answer("Отменено")
 
     @dp.callback_query(F.data=="menu")
     async def menu(call):

@@ -12,6 +12,9 @@ def cooked_button(rid, feedback=None):
     cooked=bool((feedback or {}).get("cooked"))
     return InlineKeyboardButton(text="✅ Приготовил" if cooked else "🍳 Приготовил",callback_data=f"cooked:{rid}")
 
+def report_cancel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена",callback_data="report:cancel")]])
+
 def main_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🍳 Подобрать блюдо"),KeyboardButton(text="🔎 Фильтры")],
@@ -57,6 +60,7 @@ def catalog_card_keyboard(rid, offset=0, saved=False, feedback=None):
         [cooked_button(rid,feedback)],
     ]
     rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="⚠️ Сообщить о проблеме",callback_data=f"report:start:{rid}")])
     rows.append([InlineKeyboardButton(text="← К списку рецептов", callback_data=f"catalog:{offset}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -76,6 +80,7 @@ def all_catalog_card_keyboard(rid, offset=0, saved=False, feedback=None):
         [cooked_button(rid,feedback)],
     ]
     rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="⚠️ Сообщить о проблеме",callback_data=f"report:start:{rid}")])
     rows.append([InlineKeyboardButton(text="← Все рецепты",callback_data=f"allcatalog:{offset}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -131,6 +136,7 @@ def filtered_card_keyboard(rid,offset=0,saved=False,feedback=None):
         [cooked_button(rid,feedback)],
     ]
     rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="⚠️ Сообщить о проблеме",callback_data=f"report:start:{rid}")])
     rows.append([InlineKeyboardButton(text="← К результатам",callback_data=f"filterpage:{offset}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -140,6 +146,7 @@ def recipe_keyboard(rid, saved=False, feedback=None):
         [cooked_button(rid,feedback)],
     ]
     rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="⚠️ Сообщить о проблеме",callback_data=f"report:start:{rid}")])
     rows.append([InlineKeyboardButton(text="В меню",callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -156,6 +163,7 @@ def dish_alternative_keyboard(rid, saved=False, feedback=None):
     ]
     rows.extend(recipe_feedback_buttons(rid,feedback))
     rows.extend([
+        [InlineKeyboardButton(text="⚠️ Сообщить о проблеме",callback_data=f"report:start:{rid}")],
         [InlineKeyboardButton(text="Другой вариант",callback_data="daymore")],
         [InlineKeyboardButton(text="К блюду дня для всех",callback_data="dayhome")],
     ])
@@ -182,6 +190,7 @@ def meal_plan_recipe_keyboard(index, rid, saved=False, feedback=None):
         [cooked_button(rid,feedback)],
     ]
     rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="⚠️ Сообщить о проблеме",callback_data=f"report:start:{rid}")])
     rows.append([InlineKeyboardButton(text="← К плану",callback_data="mealplan:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

@@ -24,6 +24,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS user_dish_alternatives(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
         CREATE TABLE IF NOT EXISTS meal_plans(user_id INTEGER PRIMARY KEY, recipe_ids TEXT NOT NULL, plan_date TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS recipe_feedback(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), cooked_at TEXT, liked INTEGER NOT NULL DEFAULT 0, not_suggest INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id,recipe_id));
+        CREATE TABLE IF NOT EXISTS recipe_reports(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), message TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, delivered INTEGER NOT NULL DEFAULT 0);
         """)
         user_columns={row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "allergies" not in user_columns:
@@ -138,6 +139,18 @@ class Database:
     def recently_cooked_recipe_ids(self, uid, days=7):
         modifier=f"-{int(days)} days"
         return {row[0] for row in self.conn.execute("SELECT recipe_id FROM recipe_feedback WHERE user_id=? AND cooked_at>=datetime('now',?)",(uid,modifier))}
+
+    def add_recipe_report(self, uid, rid, message):
+        with self.conn:
+            cursor=self.conn.execute("INSERT INTO recipe_reports(user_id,recipe_id,message) VALUES(?,?,?)",(uid,rid,message))
+        return cursor.lastrowid
+
+    def pending_recipe_reports(self, limit=10):
+        return self.conn.execute("SELECT id,user_id,recipe_id,message,created_at FROM recipe_reports WHERE delivered=0 ORDER BY id DESC LIMIT ?",(limit,)).fetchall()
+
+    def mark_recipe_report_delivered(self, report_id):
+        with self.conn:
+            self.conn.execute("UPDATE recipe_reports SET delivered=1 WHERE id=?",(report_id,))
 
     def shown_today(self, uid):
         return {r[0] for r in self.conn.execute("SELECT recipe_id FROM dish_of_day WHERE user_id=? AND day=?",(uid,date.today().isoformat()))}
