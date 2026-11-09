@@ -38,7 +38,7 @@ FILTER_METHODS = ["микроволновка","аэрогриль","кастр�
 EQUIPMENT_OPTIONS = ["плита","духовка","микроволновка","аэрогриль"]
 FILTER_MOODS = ["сладкое","сытное","полезное","вегетарианское","завтрак","обед","ужин","суп","салат","перекус","рыбное","морепродукты","выпечка","печенье"]
 ALLERGY_OPTIONS = ["молочное","яйца","глютен","рыба","орехи","арахис","соя","кунжут","морепродукты"]
-MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","👩‍🍳 ИИ-советчик","📅 План на 3 дня","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
+MENU_TEXTS = {"🍳 Подобрать блюдо","Найти рецепт","🔎 Найти рецепт","📚 Каталог","Все рецепты","🔎 Фильтры","Фильтры","🍲 Блюдо дня","Блюдо дня","✨ Ещё","⭐ Подписка","⭐ Dishly Plus","👩‍🍳 ИИ-советчик","📅 План на 3 дня","🏠 Главное меню","⭐ Избранное","Избранное","🕘 История","История","⚙️ Настройки","Настройки","❔ Помощь"}
 HOME_BANNER = Path(__file__).resolve().parent.parent / "assets" / "dishly-home-banner.png"
 
 def russian_sort_key(value):
@@ -184,22 +184,22 @@ async def main():
         test_access=bool(not active and config.ai_api_key and config.admin_telegram_id==uid)
         if test_access:
             text=("🧪 <b>Тестовый доступ владельца</b>\n\n"
-                  "Можешь проверять ИИ-советчика без подписки. Для остальных пользователей Dishly Plus откроется после настройки цены и оплаты.")
+                  "Можешь проверять ИИ-шефа и план на 3 дня без подписки. Для остальных пользователей Dishly Plus открывается по подписке или коду.")
             markup=advisor_test_keyboard()
         elif key_expiry and not active:
             expires=datetime.fromtimestamp(key_expiry,timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
-            text=(f"🎟 <b>Доступ к ИИ-шефу активирован</b> до {expires}.\n\n"
-                  f"Доступно до {config.advisor_daily_limit} обращений в день. Подписка и каталог Dishly остаются отдельными разделами.")
+            text=(f"🎟 <b>Dishly Plus активирован кодом</b> до {expires}.\n\n"
+                  f"Включены ИИ-шеф, план питания на 3 дня и список покупок. Для советчика доступно до {config.advisor_daily_limit} обращений в день.")
             markup=advisor_test_keyboard()
         elif active:
             auto="Автопродление отключено." if row[2] else "Подписка продлевается автоматически раз в месяц."
             text=(f"👩‍🍳 <b>Dishly Plus активен</b> до {expires}.\n{auto}\n\n"
-                  f"Доступно до {config.advisor_daily_limit} обращений к советчику в день.")
+                  f"Включены ИИ-шеф, персональный план на 3 дня и список покупок. До {config.advisor_daily_limit} обращений к советчику в день.")
             markup=plus_keyboard(active,db.plus_terms_accepted(uid),plus_ready(),bool(row and row[2]))
         else:
             text=("✨ <b>Dishly Plus</b>\n\n"
-                  "Личный ИИ-советчик поможет выбрать блюдо и подобрать подходящие рецепты из каталога, учитывая твои настройки.\n\n"
-                  "Бесплатный каталог, фильтры и план на 3 дня останутся доступны всем.\n"
+                  "✨ Подписка открывает ИИ-шефа, персональный план питания на 3 дня и список покупок по плану.\n\n"
+                  "Бесплатные каталог, поиск и фильтры останутся доступны всем.\n"
                   "Есть код доступа? Отправь <code>/activate КОД</code>.")
             if config.plus_monthly_stars:
                 text+=f"\n\nЦена: {config.plus_monthly_stars} ⭐ в месяц."
@@ -215,8 +215,8 @@ async def main():
 
     async def show_plus_terms(message, uid, access_code=False):
         if access_code:
-            text=("📄 <b>Условия ИИ-шефа</b>\n\n"
-                  "🎟 Доступ активирован кодом и действует указанный срок. За этот код бот не списывает Stars.\n"
+            text=("📄 <b>Условия Dishly Plus</b>\n\n"
+                  "🎟 Доступ активирован кодом и действует указанный срок. Он включает ИИ-шефа, план питания на 3 дня и список покупок. За этот код бот не списывает Stars.\n"
                   "🔐 Текст запроса, число порций, ограничения питания, доступная техника и подходящие рецепты отправляются настроенному AI-провайдеру и выбранной модели. Telegram ID и имя не передаются.\n"
                   "⚠️ Ответы ИИ могут содержать ошибки и не заменяют рекомендации врача. При аллергиях Dishly отбирает рецепты локально, но всегда проверяй состав и упаковку продуктов.\n\n"
                   "Нажимая кнопку ниже, ты подтверждаешь, что прочитал(а) условия и согласен(на) на обработку текста запроса AI-провайдером и выбранной моделью.")
@@ -224,7 +224,8 @@ async def main():
             return
         price_text=f"{config.plus_monthly_stars} Telegram Stars" if config.plus_monthly_stars else "цена будет показана перед оплатой после настройки"
         text=("📄 <b>Условия Dishly Plus</b>\n\n"
-              f"• Цена: {price_text} в месяц. Подписка продлевается автоматически раз в 30 дней.\n"
+              f"• Цена: {price_text} за 30 дней. Подписка продлевается автоматически раз в 30 дней.\n"
+              "• Dishly Plus включает ИИ-шефа, персональный план питания на 3 дня и список покупок по плану.\n"
               "• Отключить автопродление можно в разделе Dishly Plus; доступ сохранится до конца оплаченного периода.\n"
               "• Советчик отправляет текст запроса, число порций, ограничения питания, доступную технику и подходящие рецепты через настроенного AI-провайдера и выбранную модель. Telegram ID и имя туда не передаются.\n"
               "• Ответы ИИ могут содержать ошибки и не заменяют рекомендации врача. При аллергиях Dishly исключает рецепты локально, но всегда проверяй состав и упаковку продуктов.\n"
@@ -243,8 +244,8 @@ async def main():
             await show_plus(message,uid)
             return
         await message.answer_invoice(
-            title="Dishly Plus — ИИ-советчик",
-            description="Доступ к личному кулинарному советчику на 30 дней. Автопродление можно отключить в боте.",
+            title="Dishly Plus — ИИ-шеф и план",
+            description="ИИ-шеф, план питания на 3 дня и список покупок на 30 дней. Автопродление можно отключить в боте.",
             payload="dishly_plus_monthly_v1",
             provider_token="",
             currency="XTR",
@@ -383,7 +384,7 @@ async def main():
         if not config.admin_telegram_id or message.from_user.id!=config.admin_telegram_id:
             await message.answer("Команда доступна только администратору бота.")
             return
-        await message.answer("🛠 <b>Админ-панель Dishly</b>\n\nУправление доступом к ИИ-шефу. Каталог и остальные функции бота доступны всем.",parse_mode="HTML",reply_markup=admin_access_keyboard())
+        await message.answer("🛠 <b>Админ-панель Dishly</b>\n\nУправление доступом к ИИ-шефу и плану на 3 дня. Каталог, поиск и фильтры доступны всем.",parse_mode="HTML",reply_markup=admin_access_keyboard())
 
     @dp.message(Command("activate"))
     async def activate_ai_access(message):
@@ -396,7 +397,7 @@ async def main():
             await message.answer("⚠️ Код не найден, уже использован или отозван. Проверь его и попробуй ещё раз.")
             return
         when=datetime.fromtimestamp(expires,timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
-        await message.answer(f"🎉 Код активирован! Доступ к ИИ-шефу открыт до {when}.\n\nСначала ознакомься с условиями обработки запросов:")
+        await message.answer(f"🎉 Код активирован! Dishly Plus открыт до {when}.\n\nСначала ознакомься с условиями обработки запросов:")
         await show_plus_terms(message,message.from_user.id,access_code=True)
 
     @dp.message(Command("terms"))
@@ -527,7 +528,7 @@ async def main():
                 return
             await advisor_answer(message,uid,text)
             return
-        if text=="👩‍🍳 ИИ-советчик":
+        if text in {"👩‍🍳 ИИ-советчик","⭐ Подписка","⭐ Dishly Plus"}:
             await show_plus(message,uid)
             return
         if text=="🧺 Из моих продуктов":
@@ -591,6 +592,9 @@ async def main():
         await message.answer(title+":",reply_markup=list_keyboard(recipes))
 
     async def show_meal_plan(message,uid,edit=False,regenerate=False):
+        if not advisor_access(uid):
+            await show_plus(message,uid,edit=edit)
+            return
         settings=db.settings(uid)
         hidden=db.not_suggested_recipe_ids(uid)
         allowed=[r for r in db.recipes() if r["id"] not in hidden and not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
@@ -634,6 +638,9 @@ async def main():
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
     async def show_shopping_list(message,uid,edit=False):
+        if not advisor_access(uid):
+            await show_plus(message,uid,edit=edit)
+            return
         plan_ids=db.meal_plan(uid)
         recipes=[db.get_recipe(rid) for rid in plan_ids]
         settings=db.settings(uid)
@@ -1023,11 +1030,11 @@ async def main():
         parts=call.data.split(":")
         action=parts[1]
         if action=="home":
-            await call.message.edit_text("🛠 <b>Админ-панель Dishly</b>\n\nУправление доступом к ИИ-шефу. Каталог и остальные функции бота доступны всем.",parse_mode="HTML",reply_markup=admin_access_keyboard())
+            await call.message.edit_text("🛠 <b>Админ-панель Dishly</b>\n\nУправление доступом к ИИ-шефу и плану на 3 дня. Каталог, поиск и фильтры доступны всем.",parse_mode="HTML",reply_markup=admin_access_keyboard())
         elif action=="key" and len(parts)==3 and parts[2] in {"7","30","90"}:
             days=int(parts[2]); code=secrets.token_urlsafe(9).replace("-","").replace("_","").upper()
             db.create_plus_access_key(code,days,uid)
-            await call.message.answer(f"🎟 Код на {days} дн. создан. Он одноразовый, действует сразу после активации и продлевает уже имеющийся доступ.\n\n<code>{code}</code>\n\nСкопируй и отправь его пользователю. Бот хранит только хэш кода, повторно показать его нельзя.",parse_mode="HTML")
+            await call.message.answer(f"🎟 Код Dishly Plus на {days} дн. создан. Он одноразовый, действует сразу после активации и продлевает уже имеющийся доступ.\n\n<code>{code}</code>\n\nСкопируй и отправь его пользователю. Бот хранит только хэш кода, повторно показать его нельзя.",parse_mode="HTML")
             await call.answer("Код выпущен")
         elif action=="keys":
             rows=db.unused_plus_access_keys()
@@ -1114,7 +1121,7 @@ async def main():
         expires=payment.subscription_expiration_date or now+2592000
         recorded=db.record_plus_payment(message.from_user.id,payment.total_amount,payment.currency,payment.telegram_payment_charge_id,expires,now)
         if recorded:
-            await message.answer("🎉 Dishly Plus активирован! Открой «Ещё» → «ИИ-советчик». Автопродление можно отключить командой /plus.")
+            await message.answer("🎉 Dishly Plus активирован! Доступны ИИ-шеф, план на 3 дня и список покупок. Открой «⭐ Подписка» или «Ещё». Автопродление можно отключить там же.")
 
     @dp.callback_query(F.data.startswith("report:start:"))
     async def start_recipe_report(call):
@@ -1151,8 +1158,17 @@ async def main():
         prompt="Напиши продукты через запятую, например: яйца, помидоры." if call.data.endswith("ingredients") else "Напиши пожелание, например: быстрое, сытное или без духовки."
         await call.message.answer(prompt); await call.answer()
 
+    @dp.callback_query(F.data=="mealplan:show")
+    async def open_meal_plan(call):
+        await show_meal_plan(call.message,call.from_user.id,edit=True)
+        await call.answer()
+
     @dp.callback_query(F.data.startswith("mealplan:open:"))
     async def open_meal_plan_recipe(call):
+        if not advisor_access(call.from_user.id):
+            await show_plus(call.message,call.from_user.id,edit=True)
+            await call.answer("План на 3 дня входит в Dishly Plus")
+            return
         index=int(call.data.rsplit(":",1)[1]); plan=db.meal_plan(call.from_user.id)
         if index not in range(len(plan)):
             await call.answer("План устарел. Открой его заново.",show_alert=True); return
@@ -1183,6 +1199,10 @@ async def main():
 
     @dp.callback_query(F.data.startswith("mealplan:fav:"))
     async def meal_plan_favorite(call):
+        if not advisor_access(call.from_user.id):
+            await show_plus(call.message,call.from_user.id,edit=True)
+            await call.answer("План на 3 дня входит в Dishly Plus")
+            return
         index=int(call.data.rsplit(":",1)[1]); plan=db.meal_plan(call.from_user.id)
         if index not in range(len(plan)):
             await call.answer("План устарел. Открой его заново.",show_alert=True); return

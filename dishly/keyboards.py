@@ -21,6 +21,7 @@ def plus_keyboard(active=False, accepted=False, payments_ready=False, canceled=F
         if not canceled:
             rows.append([InlineKeyboardButton(text="Отключить автопродление",callback_data="plus:cancel")])
         rows.append([InlineKeyboardButton(text="👩‍🍳 Спросить советчика",callback_data="advisor:start")])
+        rows.append([InlineKeyboardButton(text="📅 План на 3 дня",callback_data="mealplan:show")])
     elif payments_ready:
         rows.append([InlineKeyboardButton(text="⭐ Открыть Dishly Plus",callback_data="plus:terms" if not accepted else "plus:subscribe")])
     else:
@@ -43,6 +44,7 @@ def advisor_terms_keyboard():
 def advisor_test_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👩‍🍳 Спросить советчика",callback_data="advisor:start")],
+        [InlineKeyboardButton(text="📅 Открыть план на 3 дня",callback_data="mealplan:show")],
         [InlineKeyboardButton(text="В меню",callback_data="menu")],
     ])
 
@@ -73,7 +75,7 @@ def main_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🍳 Подобрать блюдо"),KeyboardButton(text="🔎 Фильтры")],
         [KeyboardButton(text="📚 Каталог"),KeyboardButton(text="🍲 Блюдо дня")],
-        [KeyboardButton(text="✨ Ещё")],
+        [KeyboardButton(text="✨ Ещё"),KeyboardButton(text="⭐ Подписка")],
     ],resize_keyboard=True)
 
 def first_start_keyboard():
@@ -87,6 +89,7 @@ def more_menu():
         [KeyboardButton(text="👩‍🍳 ИИ-советчик")],
         [KeyboardButton(text="🧺 Из моих продуктов")],
         [KeyboardButton(text="📅 План на 3 дня")],
+        [KeyboardButton(text="⭐ Dishly Plus")],
         [KeyboardButton(text="⭐ Избранное"),KeyboardButton(text="🕘 История")],
         [KeyboardButton(text="⚙️ Настройки"),KeyboardButton(text="❔ Помощь")],
         [KeyboardButton(text="🏠 Главное меню")],
