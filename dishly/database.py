@@ -23,6 +23,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS shared_dish_of_day(day TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES recipes(id));
         CREATE TABLE IF NOT EXISTS user_dish_alternatives(user_id INTEGER NOT NULL, day TEXT NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), PRIMARY KEY(user_id,day,recipe_id));
         CREATE TABLE IF NOT EXISTS meal_plans(user_id INTEGER PRIMARY KEY, recipe_ids TEXT NOT NULL, plan_date TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS recipe_feedback(user_id INTEGER NOT NULL, recipe_id TEXT NOT NULL REFERENCES recipes(id), cooked_at TEXT, liked INTEGER NOT NULL DEFAULT 0, not_suggest INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id,recipe_id));
         """)
         user_columns={row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "allergies" not in user_columns:
@@ -109,6 +110,34 @@ class Database:
     def set_meal_plan(self, uid, recipe_ids):
         with self.conn:
             self.conn.execute("INSERT INTO meal_plans(user_id,recipe_ids,plan_date) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET recipe_ids=excluded.recipe_ids,plan_date=excluded.plan_date",(uid,json.dumps(recipe_ids),date.today().isoformat()))
+
+    def recipe_feedback(self, uid, rid):
+        row=self.conn.execute("SELECT cooked_at,liked,not_suggest FROM recipe_feedback WHERE user_id=? AND recipe_id=?",(uid,rid)).fetchone()
+        return {"cooked":bool(row and row[0]),"liked":bool(row and row[1]),"not_suggest":bool(row and row[2])}
+
+    def mark_recipe_cooked(self, uid, rid):
+        with self.conn:
+            self.conn.execute("INSERT INTO recipe_feedback(user_id,recipe_id,cooked_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id,recipe_id) DO UPDATE SET cooked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",(uid,rid))
+
+    def toggle_recipe_feedback(self, uid, rid, field):
+        if field not in {"liked","not_suggest"}:
+            raise ValueError("Unsupported recipe feedback field")
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO recipe_feedback(user_id,recipe_id) VALUES(?,?)",(uid,rid))
+            row=self.conn.execute(f"SELECT {field} FROM recipe_feedback WHERE user_id=? AND recipe_id=?",(uid,rid)).fetchone()
+            value=not bool(row[0])
+            self.conn.execute(f"UPDATE recipe_feedback SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND recipe_id=?",(int(value),uid,rid))
+        return value
+
+    def not_suggested_recipe_ids(self, uid):
+        return {row[0] for row in self.conn.execute("SELECT recipe_id FROM recipe_feedback WHERE user_id=? AND not_suggest=1",(uid,))}
+
+    def liked_recipe_ids(self, uid):
+        return {row[0] for row in self.conn.execute("SELECT recipe_id FROM recipe_feedback WHERE user_id=? AND liked=1",(uid,))}
+
+    def recently_cooked_recipe_ids(self, uid, days=7):
+        modifier=f"-{int(days)} days"
+        return {row[0] for row in self.conn.execute("SELECT recipe_id FROM recipe_feedback WHERE user_id=? AND cooked_at>=datetime('now',?)",(uid,modifier))}
 
     def shown_today(self, uid):
         return {r[0] for r in self.conn.execute("SELECT recipe_id FROM dish_of_day WHERE user_id=? AND day=?",(uid,date.today().isoformat()))}

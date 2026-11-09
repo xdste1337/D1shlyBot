@@ -1,5 +1,17 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
+def recipe_feedback_buttons(rid, feedback=None):
+    feedback=feedback or {}
+    liked=bool(feedback.get("liked")); not_suggest=bool(feedback.get("not_suggest"))
+    return [
+        [InlineKeyboardButton(text="👍 Понравилось ✓" if liked else "👍 Понравилось",callback_data=f"feedback:liked:{rid}")],
+        [InlineKeyboardButton(text="↩️ Вернуть в подбор" if not_suggest else "🚫 Не предлагать",callback_data=f"feedback:not_suggest:{rid}")],
+    ]
+
+def cooked_button(rid, feedback=None):
+    cooked=bool((feedback or {}).get("cooked"))
+    return InlineKeyboardButton(text="✅ Приготовил" if cooked else "🍳 Приготовил",callback_data=f"cooked:{rid}")
+
 def main_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🍳 Подобрать блюдо"),KeyboardButton(text="🔎 Фильтры")],
@@ -39,12 +51,14 @@ def catalog_keyboard(recipes, offset=0, has_more=False):
     rows.append([InlineKeyboardButton(text="В меню", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def catalog_card_keyboard(rid, offset=0, saved=False):
-    return InlineKeyboardMarkup(inline_keyboard=[
+def catalog_card_keyboard(rid, offset=0, saved=False, feedback=None):
+    rows=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное", callback_data=f"catalogfav:{offset}:{rid}")],
-        [InlineKeyboardButton(text="Приготовил", callback_data=f"cooked:{rid}")],
-        [InlineKeyboardButton(text="← К списку рецептов", callback_data=f"catalog:{offset}")],
-    ])
+        [cooked_button(rid,feedback)],
+    ]
+    rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="← К списку рецептов", callback_data=f"catalog:{offset}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def all_catalog_keyboard(recipes, offset=0, has_more=False):
     rows=[[InlineKeyboardButton(text=f"{i}. {r['title']}",callback_data=f"allcatalogopen:{offset}:{r['id']}")]
@@ -56,12 +70,14 @@ def all_catalog_keyboard(recipes, offset=0, has_more=False):
     rows.append([InlineKeyboardButton(text="В меню",callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def all_catalog_card_keyboard(rid, offset=0, saved=False):
-    return InlineKeyboardMarkup(inline_keyboard=[
+def all_catalog_card_keyboard(rid, offset=0, saved=False, feedback=None):
+    rows=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"allcatalogfav:{offset}:{rid}")],
-        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
-        [InlineKeyboardButton(text="← Все рецепты",callback_data=f"allcatalog:{offset}")],
-    ])
+        [cooked_button(rid,feedback)],
+    ]
+    rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="← Все рецепты",callback_data=f"allcatalog:{offset}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def filter_home_keyboard(state):
     def count(key): return len(state[key]) if key != "max_minutes" else int(state[key] is not None)
@@ -109,33 +125,41 @@ def filtered_results_keyboard(recipes,offset=0,has_more=False):
     rows.append([InlineKeyboardButton(text="Изменить фильтры",callback_data="fhome")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def filtered_card_keyboard(rid,offset=0,saved=False):
-    return InlineKeyboardMarkup(inline_keyboard=[
+def filtered_card_keyboard(rid,offset=0,saved=False,feedback=None):
+    rows=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"filterfav:{offset}:{rid}")],
-        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
-        [InlineKeyboardButton(text="← К результатам",callback_data=f"filterpage:{offset}")],
-    ])
+        [cooked_button(rid,feedback)],
+    ]
+    rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="← К результатам",callback_data=f"filterpage:{offset}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def recipe_keyboard(rid, saved=False):
-    return InlineKeyboardMarkup(inline_keyboard=[
+def recipe_keyboard(rid, saved=False, feedback=None):
+    rows=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"fav:{rid}")],
-        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
-        [InlineKeyboardButton(text="В меню",callback_data="menu")],
-    ])
+        [cooked_button(rid,feedback)],
+    ]
+    rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="В меню",callback_data="menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def dish_day_keyboard(rid, saved=False):
-    kb = recipe_keyboard(rid, saved)
+def dish_day_keyboard(rid, saved=False, feedback=None):
+    kb = recipe_keyboard(rid, saved, feedback)
     kb.inline_keyboard[0][0].callback_data=f"dayfav:{rid}"
     kb.inline_keyboard.insert(2, [InlineKeyboardButton(text="Другой вариант",callback_data="daymore")])
     return kb
 
-def dish_alternative_keyboard(rid, saved=False):
-    return InlineKeyboardMarkup(inline_keyboard=[
+def dish_alternative_keyboard(rid, saved=False, feedback=None):
+    rows=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"altfav:{rid}")],
-        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
+        [cooked_button(rid,feedback)],
+    ]
+    rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.extend([
         [InlineKeyboardButton(text="Другой вариант",callback_data="daymore")],
         [InlineKeyboardButton(text="К блюду дня для всех",callback_data="dayhome")],
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def list_keyboard(recipes, prefix="recipe"):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=r["title"],callback_data=f"{prefix}:{r['id']}")] for r in recipes] + [[InlineKeyboardButton(text="В меню",callback_data="menu")]])
@@ -152,12 +176,14 @@ def meal_plan_keyboard(recipes):
 def shopping_list_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="← К плану",callback_data="mealplan:back")]])
 
-def meal_plan_recipe_keyboard(index, rid, saved=False):
-    return InlineKeyboardMarkup(inline_keyboard=[
+def meal_plan_recipe_keyboard(index, rid, saved=False, feedback=None):
+    rows=[
         [InlineKeyboardButton(text="Убрать из избранного" if saved else "В избранное",callback_data=f"mealplan:fav:{index}")],
-        [InlineKeyboardButton(text="Приготовил",callback_data=f"cooked:{rid}")],
-        [InlineKeyboardButton(text="← К плану",callback_data="mealplan:back")],
-    ])
+        [cooked_button(rid,feedback)],
+    ]
+    rows.extend(recipe_feedback_buttons(rid,feedback))
+    rows.append([InlineKeyboardButton(text="← К плану",callback_data="mealplan:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def meal_plan_unavailable_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="В меню",callback_data="menu")]])

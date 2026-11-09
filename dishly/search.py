@@ -20,9 +20,11 @@ def blocked(recipe, exclusions):
             return True
     return False
 
-def rank_recipes(recipes, query, user_exclusions=(), offset=0, limit=5):
+def rank_recipes(recipes, query, user_exclusions=(), offset=0, limit=5, liked_recipe_ids=(), recently_cooked_recipe_ids=()):
     ranked = []
     exclusions = set(query.excluded) | set(user_exclusions)
+    liked=set(liked_recipe_ids)
+    recently_cooked=set(recently_cooked_recipe_ids)
     for recipe in recipes:
         if blocked(recipe, exclusions): continue
         terms = recipe_ingredients(recipe)
@@ -37,6 +39,8 @@ def rank_recipes(recipes, query, user_exclusions=(), offset=0, limit=5):
             points -= min(len(missing), 3) * 1.4
         if query.tags: points += len(tag_overlap) * 3.0 - (len(query.tags-tag_overlap))*1.5
         if query.max_minutes: points += 2 if time_ok else -4
+        if recipe["id"] in liked: points += 1.5
+        if recipe["id"] in recently_cooked: points -= 2.0
         if not query.ingredients and not query.tags and not query.max_minutes: continue
         # Surface imperfect results as such, without claiming failed conditions matched.
         ranked.append((points, recipe, sorted(matched), sorted(missing), time_ok, sorted(query.tags-tag_overlap)))

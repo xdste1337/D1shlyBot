@@ -92,7 +92,8 @@ async def show_search(message, offset=0, user_id=None, edit=False):
     query,raw=queries.get(uid,(None,""))
     if not query: return
     settings=db.settings(uid)
-    recipes=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+    hidden=db.not_suggested_recipe_ids(uid)
+    recipes=[recipe for recipe in db.recipes() if recipe["id"] not in hidden and suitable_for_equipment(recipe,settings["equipment"])]
     if uid in pantry_results:
         all_results=rank_pantry_recipes(recipes,query.ingredients,set(user_restrictions(settings))|set(query.excluded))
         page=all_results[offset:offset+5]
@@ -120,7 +121,7 @@ async def show_search(message, offset=0, user_id=None, edit=False):
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
         return
-    all_results=rank_recipes(recipes,query,user_restrictions(settings),offset=0,limit=100)
+    all_results=rank_recipes(recipes,query,user_restrictions(settings),offset=0,limit=100,liked_recipe_ids=db.liked_recipe_ids(uid),recently_cooked_recipe_ids=db.recently_cooked_recipe_ids(uid))
     page=all_results[offset:offset+5]
     if not page:
         text="По этому запросу больше рецептов нет. Попробуй другие продукты или пожелания."
@@ -179,7 +180,9 @@ async def main():
         settings=db.settings(uid); recipe=get_shared_dish()
         lines=[f"👋 <b>Привет{name}!</b>",greeting,"",f"📚 В каталоге уже <b>{len(db.recipes())}</b> идей для готовки."]
         if recipe:
-            if blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]):
+            if recipe["id"] in db.not_suggested_recipe_ids(uid):
+                lines.append("🍲 Общее блюдо дня выбрано для всех. Ты попросил не предлагать его — личные подборки его пропустят.")
+            elif blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]):
                 lines.append("🍲 Блюдо дня выбрано для всех, а я учту твои ограничения и технику и предложу подходящие рецепты.")
             else:
                 lines.append(f"🍲 Блюдо дня: <b>{html.escape(recipe['title'])}</b> · ⏱ {recipe['minutes']} мин. · 🔥 ~{recipe['kcal_per_serving']} ккал/порц.")
@@ -259,7 +262,8 @@ async def main():
             if not query.ingredients:
                 await message.answer("Не распознал продукты. Напиши основные ингредиенты через запятую, например: яйца, картофель, сыр. Или отправь «Отмена».",reply_markup=pantry_prompt_keyboard()); return
             settings=db.settings(uid)
-            available=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+            hidden=db.not_suggested_recipe_ids(uid)
+            available=[recipe for recipe in db.recipes() if recipe["id"] not in hidden and suitable_for_equipment(recipe,settings["equipment"])]
             results=rank_pantry_recipes(available,query.ingredients,set(user_restrictions(settings))|set(query.excluded))
             if not results:
                 await message.answer("Не нашёл подходящих рецептов с этими продуктами и твоими настройками. Попробуй указать меньше продуктов или отправь «Отмена».",reply_markup=pantry_prompt_keyboard()); return
@@ -281,7 +285,8 @@ async def main():
 
     async def show_meal_plan(message,uid,edit=False,regenerate=False):
         settings=db.settings(uid)
-        allowed=[r for r in db.recipes() if not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
+        hidden=db.not_suggested_recipe_ids(uid)
+        allowed=[r for r in db.recipes() if r["id"] not in hidden and not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
         allowed_ids={r["id"] for r in allowed}
         previous_ids=db.meal_plan(uid)
         plan_ids=[] if regenerate else previous_ids
@@ -292,8 +297,8 @@ async def main():
                 if edit: await message.edit_text(text,reply_markup=meal_plan_unavailable_keyboard())
                 else: await message.answer(text,reply_markup=main_menu())
                 return
-            recent={r["id"] for r in db.history(uid)}
-            favorites={r["id"] for r in db.favorites(uid)}
+            recent={r["id"] for r in db.history(uid)} | db.recently_cooked_recipe_ids(uid)
+            favorites={r["id"] for r in db.favorites(uid)} | db.liked_recipe_ids(uid)
             pool=[r for r in allowed if r["id"] not in recent and (not regenerate or r["id"] not in previous_ids)]
             if len(pool)<3 and regenerate:
                 pool=[r for r in allowed if r["id"] not in previous_ids]
@@ -324,10 +329,11 @@ async def main():
     async def show_shopping_list(message,uid,edit=False):
         plan_ids=db.meal_plan(uid)
         recipes=[db.get_recipe(rid) for rid in plan_ids]
-        if len(recipes)!=3 or any(not recipe for recipe in recipes):
+        settings=db.settings(uid)
+        hidden=db.not_suggested_recipe_ids(uid)
+        if len(recipes)!=3 or any(not recipe or recipe["id"] in hidden or blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]) for recipe in recipes):
             await show_meal_plan(message,uid,edit=edit)
             return
-        settings=db.settings(uid)
         totals={}
         for recipe in recipes:
             ratio=settings["servings"]/recipe["servings"]
@@ -422,7 +428,8 @@ async def main():
 
     async def show_filtered_results(message,uid,offset=0,edit=True):
         state=get_filter_state(uid); settings=db.settings(uid)
-        available=[recipe for recipe in db.recipes() if suitable_for_equipment(recipe,settings["equipment"])]
+        hidden=db.not_suggested_recipe_ids(uid)
+        available=[recipe for recipe in db.recipes() if recipe["id"] not in hidden and suitable_for_equipment(recipe,settings["equipment"])]
         recipes=filter_recipes(available,state["ingredients"],state["methods"]|state["moods"],state["max_minutes"],user_restrictions(settings))
         filter_results[uid]=[recipe["id"] for recipe in recipes]
         if not recipes:
@@ -443,12 +450,13 @@ async def main():
         recipe=get_shared_dish()
         if not recipe: return
         rid=recipe["id"]; db.add_history(uid,rid)
-        if blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]):
+        hidden=rid in db.not_suggested_recipe_ids(uid)
+        if blocked(recipe,user_restrictions(settings)) or not suitable_for_equipment(recipe,settings["equipment"]) or hidden:
             text=(f"🍲 <b>Блюдо дня для всех</b>\n\n<b>{recipe['title']}</b> · {recipe['minutes']} мин.\n"
-                  "Это блюдо не подходит под твои ограничения или доступную технику. Нажми «Другой вариант» — подберу личную альтернативу.")
+                  "Это блюдо не подходит под твои настройки или отмечено «Не предлагать». Нажми «Другой вариант» — подберу личную альтернативу.")
         else:
             text="🍲 <b>Блюдо дня для всех</b>\n\n"+recipe_text(recipe,settings["servings"])
-        markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid))
+        markup=dish_day_keyboard(recipe["id"],recipe in db.favorites(uid),db.recipe_feedback(uid,recipe["id"]))
         if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=markup)
         else: await message.answer(text,parse_mode="HTML",reply_markup=markup)
 
@@ -456,7 +464,9 @@ async def main():
         settings=db.settings(user_id)
         daily_id=db.shared_dish_today()
         seen=db.user_alternatives_today(user_id)
-        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
+        hidden=db.not_suggested_recipe_ids(user_id)
+        recently_cooked=db.recently_cooked_recipe_ids(user_id)
+        candidates=[r for r in db.recipes() if r["id"] != daily_id and r["id"] not in seen and r["id"] not in hidden and r["id"] not in recently_cooked and not blocked(r,user_restrictions(settings)) and suitable_for_equipment(r,settings["equipment"])]
         if not candidates:
             text="На сегодня больше подходящих вариантов нет. Общее блюдо дня осталось прежним."
             if edit: await message.edit_text(text,reply_markup=None)
@@ -465,8 +475,9 @@ async def main():
         recipe=random.choice(candidates); db.mark_user_alternative(user_id,recipe["id"]); db.add_history(user_id,recipe["id"])
         saved=any(r["id"]==recipe["id"] for r in db.favorites(user_id))
         text="🍽 <b>Другой вариант для тебя</b>\n\n"+recipe_text(recipe,settings["servings"])
-        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
-        else: await message.answer(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved))
+        feedback=db.recipe_feedback(user_id,recipe["id"])
+        if edit: await message.edit_text(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved,feedback))
+        else: await message.answer(text,parse_mode="HTML",reply_markup=dish_alternative_keyboard(recipe["id"],saved,feedback))
 
     @dp.callback_query(F.data=="daymore")
     async def daymore_handler(call):
@@ -481,13 +492,13 @@ async def main():
     @dp.callback_query(F.data.startswith("altfav:"))
     async def alternative_favorite(call):
         rid=call.data.split(":",1)[1]; saved=db.toggle_favorite(call.from_user.id,rid)
-        await call.message.edit_reply_markup(reply_markup=dish_alternative_keyboard(rid,saved))
+        await call.message.edit_reply_markup(reply_markup=dish_alternative_keyboard(rid,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("dayfav:"))
     async def shared_dish_favorite(call):
         rid=call.data.split(":",1)[1]; saved=db.toggle_favorite(call.from_user.id,rid)
-        await call.message.edit_reply_markup(reply_markup=dish_day_keyboard(rid,saved))
+        await call.message.edit_reply_markup(reply_markup=dish_day_keyboard(rid,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("catalogopen:"))
@@ -498,7 +509,7 @@ async def main():
         db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
         available=queries.get(call.from_user.id,(None,""))[0].ingredients if call.from_user.id in pantry_results and call.from_user.id in queries else None
-        await call.message.edit_text(recipe_text(recipe,settings["servings"],available,user_restrictions(settings)),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved))
+        await call.message.edit_text(recipe_text(recipe,settings["servings"],available,user_restrictions(settings)),parse_mode="HTML",reply_markup=catalog_card_keyboard(rid,offset,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer()
 
     @dp.callback_query(F.data.startswith("catalog:"))
@@ -511,7 +522,7 @@ async def main():
     async def catalog_favorite(call):
         _,offset,rid=call.data.split(":",2); offset=int(offset)
         saved=db.toggle_favorite(call.from_user.id,rid)
-        await call.message.edit_reply_markup(reply_markup=catalog_card_keyboard(rid,offset,saved))
+        await call.message.edit_reply_markup(reply_markup=catalog_card_keyboard(rid,offset,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("allcatalogopen:"))
@@ -521,7 +532,7 @@ async def main():
         if not recipe: await call.answer("Рецепт не найден",show_alert=True); return
         db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
         saved=any(x["id"]==rid for x in db.favorites(call.from_user.id))
-        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=all_catalog_card_keyboard(rid,offset,saved))
+        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=all_catalog_card_keyboard(rid,offset,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer()
 
     @dp.callback_query(F.data.startswith("allcatalog:"))
@@ -534,7 +545,7 @@ async def main():
     async def all_catalog_favorite(call):
         _,offset,rid=call.data.split(":",2); offset=int(offset)
         saved=db.toggle_favorite(call.from_user.id,rid)
-        await call.message.edit_reply_markup(reply_markup=all_catalog_card_keyboard(rid,offset,saved))
+        await call.message.edit_reply_markup(reply_markup=all_catalog_card_keyboard(rid,offset,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("fcat:"))
@@ -596,14 +607,14 @@ async def main():
         if not recipe: await call.answer("Рецепт не найден",show_alert=True); return
         db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
         saved=any(item["id"]==rid for item in db.favorites(call.from_user.id))
-        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=filtered_card_keyboard(rid,offset,saved))
+        await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=filtered_card_keyboard(rid,offset,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer()
 
     @dp.callback_query(F.data.startswith("filterfav:"))
     async def filtered_favorite(call):
         _,offset,rid=call.data.split(":",2); offset=int(offset)
         saved=db.toggle_favorite(call.from_user.id,rid)
-        await call.message.edit_reply_markup(reply_markup=filtered_card_keyboard(rid,offset,saved))
+        await call.message.edit_reply_markup(reply_markup=filtered_card_keyboard(rid,offset,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("recipe:"))
@@ -612,18 +623,48 @@ async def main():
         if not r: await call.answer("Рецепт не найден",show_alert=True); return
         db.add_history(call.from_user.id,rid); settings=db.settings(call.from_user.id)
         fav=any(x["id"]==rid for x in db.favorites(call.from_user.id))
-        await call.message.answer(recipe_text(r,settings["servings"]),parse_mode="HTML",reply_markup=recipe_keyboard(rid,fav))
+        await call.message.answer(recipe_text(r,settings["servings"]),parse_mode="HTML",reply_markup=recipe_keyboard(rid,fav,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer()
 
     @dp.callback_query(F.data.startswith("fav:"))
     async def favorite(call):
         rid=call.data.split(":",1)[1]; saved=db.toggle_favorite(call.from_user.id,rid)
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
-        await call.message.edit_reply_markup(reply_markup=recipe_keyboard(rid,saved))
+        await call.message.edit_reply_markup(reply_markup=recipe_keyboard(rid,saved,db.recipe_feedback(call.from_user.id,rid)))
 
     @dp.callback_query(F.data.startswith("cooked:"))
     async def cooked(call):
-        await call.answer("Приятного аппетита!",show_alert=False)
+        rid=call.data.split(":",1)[1]
+        db.mark_recipe_cooked(call.from_user.id,rid)
+        db.add_history(call.from_user.id,rid)
+        markup=call.message.reply_markup
+        if markup:
+            for row in markup.inline_keyboard:
+                for button in row:
+                    if button.callback_data==f"cooked:{rid}": button.text="✅ Приготовил"
+            await call.message.edit_reply_markup(reply_markup=markup)
+        await call.answer("Отметил в истории приготовленного 🍳")
+
+    @dp.callback_query(F.data.startswith("feedback:"))
+    async def recipe_feedback(call):
+        _,field,rid=call.data.split(":",2)
+        if field not in {"liked","not_suggest"}:
+            await call.answer("Неизвестный тип оценки",show_alert=True); return
+        enabled=db.toggle_recipe_feedback(call.from_user.id,rid,field)
+        markup=call.message.reply_markup
+        callback_data=f"feedback:{field}:{rid}"
+        if markup:
+            for row in markup.inline_keyboard:
+                for button in row:
+                    if button.callback_data==callback_data:
+                        if field=="liked": button.text="👍 Понравилось ✓" if enabled else "👍 Понравилось"
+                        else: button.text="↩️ Вернуть в подбор" if enabled else "🚫 Не предлагать"
+            await call.message.edit_reply_markup(reply_markup=markup)
+        if field=="liked":
+            answer="Буду учитывать, что тебе понравилось 👍" if enabled else "Оценку убрал"
+        else:
+            answer="Блюдо исключено из рекомендаций" if enabled else "Блюдо вернулось в рекомендации"
+        await call.answer(answer)
 
     @dp.callback_query(F.data=="menu")
     async def menu(call):
@@ -655,7 +696,7 @@ async def main():
         db.add_history(call.from_user.id,recipe["id"])
         settings=db.settings(call.from_user.id)
         saved=any(r["id"]==recipe["id"] for r in db.favorites(call.from_user.id))
-        markup=meal_plan_recipe_keyboard(index,recipe["id"],saved)
+        markup=meal_plan_recipe_keyboard(index,recipe["id"],saved,db.recipe_feedback(call.from_user.id,recipe["id"]))
         await call.message.edit_text(recipe_text(recipe,settings["servings"]),parse_mode="HTML",reply_markup=markup)
         await call.answer()
 
@@ -680,7 +721,7 @@ async def main():
         if index not in range(len(plan)):
             await call.answer("План устарел. Открой его заново.",show_alert=True); return
         rid=plan[index]; saved=db.toggle_favorite(call.from_user.id,rid)
-        await call.message.edit_reply_markup(reply_markup=meal_plan_recipe_keyboard(index,rid,saved))
+        await call.message.edit_reply_markup(reply_markup=meal_plan_recipe_keyboard(index,rid,saved,db.recipe_feedback(call.from_user.id,rid)))
         await call.answer("Добавлено в избранное" if saved else "Убрано из избранного")
 
     @dp.callback_query(F.data.startswith("settings:"))
