@@ -14,7 +14,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, Message, CallbackQuery, LabeledPrice
+from aiogram.types import FSInputFile, Message, CallbackQuery, LabeledPrice, ReplyKeyboardRemove
 
 from .config import load_config
 from .database import Database
@@ -973,13 +973,15 @@ async def main():
             await call.answer("Нужна активная подписка Dishly Plus")
             return
         advisor_sessions.setdefault(uid,[])
-        await call.message.answer("👩‍🍳 Напиши, что хочется приготовить или какие продукты есть. Учитываю настройки профиля; можно завершить кнопкой ниже.",reply_markup=advisor_cancel_keyboard())
+        await call.message.answer("👩‍🍳 Напиши, что хочется приготовить или какие продукты есть. Учитываю настройки профиля.",reply_markup=ReplyKeyboardRemove())
+        await call.message.answer("Когда закончишь, нажми кнопку:",reply_markup=advisor_cancel_keyboard())
         await call.answer()
 
     @dp.callback_query(F.data=="advisor:stop")
     async def advisor_stop(call):
         advisor_sessions.pop(call.from_user.id,None)
         await call.message.edit_reply_markup(reply_markup=None)
+        await call.message.answer("Консультация завершена. Бесплатные рецепты доступны в меню 🍲",reply_markup=main_menu())
         await call.answer("Консультация завершена")
 
     @dp.pre_checkout_query()
